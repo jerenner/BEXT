@@ -1,0 +1,66 @@
+
+############################ INPUT DATA ################################
+#--------- INPUT DATA FORMAT -------#
+CNTJob READER S ireneReader
+
+#--------- INPUT DATA FILES -------#
+CNTJob INPUT_DATA SV 1
+/data4/NEXT/MAGBOX/sim/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.next
+
+
+############################ OUTPUT DATA ################################
+#------ SAVE EVENTS IN OUTPUT FILE ----------# 
+CNTJob SAVE I 0
+
+#--------- DATA WRITER -------#
+CNTJob WRITER S ireneWriter
+
+#--------- OUTPUT DATA -------#
+CNTJob OUTPUT_DATA SV 1
+temp.root
+
+############################ EVENTS TO ANALYZE ##########################
+#---------- NUMBER OF EVENTS TO ANALYZE ----------#
+CNTJob NEVENTS I 10000
+
+#---------- FIRST EVENS TO ANALYZE ----------#
+CNTJob FEVENT I 0
+
+
+
+############################ VERBOSITY LEVEL ##########################
+#---------- VERBOSITY LEVEL ----------#
+CNTJob LEVEL I 1
+
+
+
+############################ AUXILIARY FILES ##############################
+#------------- LOG FILE -------------#
+CNTJob LOG I 1
+CNTJob FLOG S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/true/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.log
+
+
+#---------- HISTOGRAMS FILE ----------#
+CNTJob HISTOS I 1
+CNTJob FHISTOS S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/true/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.histos.root
+
+
+
+
+############################ ALGORITHMS ################################
+#--------- PATHS with modules to be used -------#
+CNTJob PATHS SV 1
+/home/jmunoz/dev/Next100_2K15/preproc/algos/
+
+#--------- ALGORITHMS-------#
+CNTJob ALGOS SV 2
+TrueEnergyFilter
+IGConverter
+
+#---------- Algorithm parameters ----------#
+TrueEnergyFilter minEnergy D 2.4
+TrueEnergyFilter maxEnergy D 3.0
+TrueEnergyFilter LEVEL I 1
+
+IGConverter GATE_DST_NAME S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/true/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.gate.root
+IGConverter LEVEL I 1
