@@ -356,10 +356,10 @@ class Curv(AAlgo):
             l_sprof_y.append(sproftbl[-1,1] + ((sproftbl[-2,1]-sproftbl[-1,1])/(sproftbl[-2,0]-sproftbl[-1,0]))*(1.0 - sproftbl[-1,0]))
             l_sprofs_y.append(sproftbl[-1,2] + ((sproftbl[-2,2]-sproftbl[-1,2])/(sproftbl[-2,0]-sproftbl[-1,0]))*(1.0 - sproftbl[-1,0]))
 
-            sprof = interp1d(l_sprof_x,l_sprof_y,kind='cubic')
-            sprof_sigma = interp1d(l_sprof_x,l_sprofs_y,kind='cubic')
+            self.sprof = interp1d(l_sprof_x,l_sprof_y,kind='cubic')
+            self.sprof_sigma = interp1d(l_sprof_x,l_sprofs_y,kind='cubic')
 
-            bproftbl = np.loadtxt(prof_bfile)
+            bproftbl = np.loadtxt(self.prof_bfile)
             l_bprof_x = []; l_bprof_y = []; l_bprofs_y = []
             l_bprof_x.append(0.0)
             l_bprof_y.append(bproftbl[0,1] - ((bproftbl[1,1]-bproftbl[0,1])/(bproftbl[1,0]-bproftbl[0,0]))*bproftbl[0,0])
@@ -400,14 +400,43 @@ class Curv(AAlgo):
             self.m.log("ERROR: Event has more than 1 track.")
             exit(0)
 
+        # Get the single track for this event.
+        main_trk = all_trks[0]
+
+        # Get the order of the hits.
+        hOrder = main_trk.fetch_ivstore("MainPathHits")
+        #for iord in hOrder: print "{0}, ".format(iord);
+
+        # Get the list of hits.
+        hList = self.event.GetHits()
+        
+        #print "{0} hits in main track, {1} total hits".format(len(hOrder),len(hList))
+        #dpr = dir(main_trk); print dpr
+        
         # Fill arrays with hit information.
         trk_xM_0 = []; trk_yM_0 = []; trk_zM_0 = []
-        trk_eM_0 = []
-        for hit in self.event.GetHits():
-            trk_xM_0.append(hit.GetPosition().x())
-            trk_yM_0.append(hit.GetPosition().y())
-            trk_zM_0.append(hit.GetPosition().z())
-            trk_eM_0.append(hit.GetAmplitude())
+        trk_nM_0 = []; trk_eM_0 = []
+        nhit = 0
+        #for hit in self.event.GetHits():
+        for ihit in hOrder:
+            trk_xM_0.append(hList[ihit].GetPosition().x())
+            trk_yM_0.append(hList[ihit].GetPosition().y())
+            trk_zM_0.append(hList[ihit].GetPosition().z())
+            trk_eM_0.append(hList[ihit].GetAmplitude())
+            trk_nM_0.append(nhit)
+            nhit = nhit + 1
+
+        #print "First hit at {0}, {1}, {2}".format(hit0.GetPosition().x(),hit0.GetPosition().y(),hit0.GetPosition().z());
+        #print "Last hit at {0}, {1}, {2}".format(hitm1.GetPosition().x(),hitm1.GetPosition().y(),hitm1.GetPosition().z());
+        #print "First hit at {0}, {1}, {2}".format(trk_xM_0[0],trk_yM_0[0],trk_zM_0[0]);
+        #print "Last hit at {0}, {1}, {2}".format(trk_xM_0[-1],trk_yM_0[-1],trk_zM_0[-1]);
+
+        #e1, e2 = all_trks[0].GetExtremes();
+        #print "First extreme at {0}, {1}, {2}".format(e1.GetPosition().x(),e1.GetPosition().y(),e1.GetPosition().z());
+        #print "Last extreme at {0}, {1}, {2}".format(e2.GetPosition().x(),e2.GetPosition().y(),e2.GetPosition().z());
+
+        # Reverse the hits if they are not in the correct order.
+
 
         # Design the LPF.
         #ux0 = trk_ux[0]; uy0 = trk_uy[0]; print "ux = {0}, uy = {1}".format(ux0,uy0);
@@ -582,15 +611,15 @@ class Curv(AAlgo):
         if(self.prof_cf):
 
             # Compute the fchi2F and fchi2R.
-            nn = 0; ntotpts = Nsvals
+            ntotpts = Nsvals
             chi2S = 0.; chi2B = 0.; ndof = 0
-            for nn in range(ntotpts):
-                kon = 1.0*nn/ntotpts
-                sgn = sscurv[nn]
+            for npt in range(ntotpts):
+                kon = 1.0*npt/ntotpts
+                sgn = sscurv[npt]
 
                 if(kon > self.kon_min and kon < self.kon_max):
-                    chi2S += (sgn-sprof(kon))**2/sprof_sigma(kon)**2
-                    chi2B += (sgn-bprof(kon))**2/bprof_sigma(kon)**2
+                    chi2S += (sgn-self.sprof(kon))**2/self.sprof_sigma(kon)**2
+                    chi2B += (sgn-self.bprof(kon))**2/self.bprof_sigma(kon)**2
                     ndof += 1
                 #print "Signal: k/N = {0}, sign is {1}, prof. is {2}, prof. sigma is {3}".format(kon,sgn,sprof(kon),sprof_sigma(kon));
             self.l_chi2S.append(chi2S/ndof)
@@ -772,8 +801,10 @@ class Curv(AAlgo):
 
             ax8 = fig.add_subplot(111, projection='3d');
             #ax1.plot(trk_xM_0,trk_yM_0,trk_zM_0,'-',color='0.9');
+            trk_nM_arr = np.array(trk_nM_0)
             trk_eM_arr = np.array(trk_eM_0)
-            s8 = ax8.scatter(trk_xM_0,trk_yM_0,trk_zM_0,marker='o',s=30,linewidth=0.2,c=trk_eM_arr*1000,cmap=plt.get_cmap('rainbow'),vmin=0.0,vmax=max(trk_eM_0*1000));
+            #s8 = ax8.scatter(trk_xM_0,trk_yM_0,trk_zM_0,marker='o',s=30,linewidth=0.2,c=trk_eM_arr*1000,cmap=plt.get_cmap('rainbow'),vmin=0.0,vmax=max(trk_eM_0*1000));
+            s8 = ax8.scatter(trk_xM_0,trk_yM_0,trk_zM_0,marker='o',s=30,linewidth=0.2,c=trk_nM_arr,cmap=plt.get_cmap('rainbow'),vmin=0.0,vmax=max(trk_nM_0));
             s8.set_edgecolors = s8.set_facecolors = lambda *args:None;  # this disables automatic setting of alpha relative of distance to camera
             #ax1.plot(trk_xM_0,trk_yM_0,trk_zM_0,'.',color='black');
             ax8.set_xlabel("x (mm)");
@@ -795,7 +826,8 @@ class Curv(AAlgo):
 
             plt.title("Unfiltered");
             cb8 = plt.colorbar(s8);
-            cb8.set_label('Hit energy (keV)');
+            #cb8.set_label('Hit energy (keV)');
+            cb8.set_label('Hit number');
             plt.savefig("{0}/plt_trk_unflt_{1}_{2}.pdf".format(self.plt_base,self.trk_name,trk_num), bbox_inches='tight');
             plt.close();
      
@@ -839,10 +871,10 @@ class Curv(AAlgo):
 
             print "Writing file with {0} entries...".format(len(self.l_scurv_mean))
             fm = open("{0}/scurv_means.dat".format(self.plt_base),"w")
-            fm.write("# (trk) (chi2s) (chi2b)\n")
+            fm.write("# (trk) (asymm) (chi2s) (chi2b)\n")
             ntrk = 0
             for scurv,chi2s,chi2b in zip(self.l_scurv_mean,self.l_chi2S,self.l_chi2B):
-                fm.write("{0} {1} {2}\n".format(ntrk,chi2s,chi2b))
+                fm.write("{0} {1} {2} {3}\n".format(ntrk,scurv,chi2s,chi2b))
                 ntrk += 1
             fm.close()
 
@@ -910,7 +942,7 @@ class Curv(AAlgo):
 
             ax1.set_xlabel("Fractional location along track (k/N)");
             ax1.set_ylabel("Average sign profile (signal)");
-            plt.savefig("{0}/sbprof_{1}.pdf".format(self.plt_base,self.prof_name), bbox_inches='tight');
+            plt.savefig("{0}/sbprof_{1}.pdf".format(self.plt_base,self.trk_name), bbox_inches='tight');
             plt.close();
         
         self.m.log(1,'+++End method of algo_example algorithm+++')
