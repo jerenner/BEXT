@@ -24,7 +24,7 @@ CNTJob READER S gateReader
 
 #--------- INPUT DATA FILES -------#
 CNTJob INPUT_DATA SV 1
-/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.p1.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.voxels2.energy07.p1.gate.root
 
 ############################ OUTPUT DATA ################################
 #------ SAVE EVENTS IN OUTPUT FILE ----------#
@@ -35,11 +35,11 @@ CNTJob WRITER S gateWriter
 
 #--------- OUTPUT DATA -------#
 CNTJob OUTPUT_DATA SV 1
-/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.p2.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.voxels2.energy07.p2.gate.root
 
 ############################ EVENTS TO ANALYZE ##########################
 #---------- NUMBER OF EVENTS TO ANALYZE ----------#
-CNTJob NEVENTS I 25
+CNTJob NEVENTS I 10000
 
 #---------- FIRST EVENS TO ANALYZE ----------#
 CNTJob FEVENT I 0
@@ -59,20 +59,20 @@ CNTJob ALGOS SV 1
 Curv
 
 # declare algorithm parameters
-Curv trk_name S nmagse2
+Curv trk_name S nmagbb2
 Curv trk_outdir S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out
 Curv data_dir S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/DATA
 Curv Pgas D 10.
 Curv Tgas D 293.15
 Curv Bfield D 0.5
 Curv KEinit D 2.447
-Curv num_tracks I 10
+Curv num_tracks I 10000
 Curv prof_sname S nmagbb2
 Curv prof_bname S nmagse2
-Curv prof_gen I 1
-Curv prof_cf I 0
+Curv prof_gen I 0
+Curv prof_cf I 1
 Curv plt_drawfilter I 0
-Curv plt_drawtrk I 1
+Curv plt_drawtrk I 0
 Curv output_means I 1
 Curv fcbar_fixed I 1
 Curv fcbar_fix D 0.085
@@ -82,7 +82,7 @@ Curv kon_min D 0.0
 Curv kon_max D 1.0
 
 # declare log file
-CNTJob FLOG S job.log
+CNTJob FLOG S job_nmagbb.log
 
 # declare histogram file
 CNTJob FHISTOS S histograms.root
