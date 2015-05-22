@@ -1,6 +1,7 @@
 
 import os
 import numpy as np
+import random as rd
 import scipy.integrate as itg
 import scipy.signal as signal
 import matplotlib.pyplot as plt
@@ -78,20 +79,28 @@ class Curv(AAlgo):
             self.m.log(1, "WARNING!! Parameter: 'Bfield' not defined.")
             exit(0)
 
+        # Flag for using voxels (if = 0, use MC hits)
+        try:
+            self.use_voxels = self.ints['use_voxels']
+            self.m.log(1, "Use voxels = {0}".format(self.use_voxels))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'use_voxels' not defined.")
+            exit(0)
+
+        # Flag for determining start/end of track using blob energies.
+        try:
+            self.blob_ordering = self.ints['blob_ordering']
+            self.m.log(1, "Use blob ordering = {0}".format(self.blob_ordering))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'blob_ordering' not defined.")
+            exit(0)
+
         # Initial kinetic energy (MeV)
         try:
             self.KEinit = self.doubles['KEinit']
             self.m.log(1, "Initial kinetic energy = {0}".format(self.KEinit))
         except KeyError:
             self.m.log(1, "WARNING!! Parameter: 'KEinit' not defined.")
-            exit(0)
-
-        # Number of tracks to process
-        try:
-            self.num_tracks = self.ints['num_tracks']
-            self.m.log(1, "Number of tracks to process = {0}".format(self.num_tracks))
-        except KeyError:
-            self.m.log(1, "WARNING!! Parameter: 'num_tracks' not defined.")
             exit(0)
 
         # Signal profile name
@@ -216,6 +225,39 @@ class Curv(AAlgo):
             self.m.log(1, "WARNING!! Parameter: 'kon_max' not defined.")
             exit(0)
 
+        # Blob radius
+        try:
+            self.blob_radius = self.doubles['blob_radius']
+            self.m.log(1, "blob radius = {0}".format(self.blob_radius))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'blob_radius' not defined.")
+            exit(0)
+
+        # Amount of x-y smearing (sigma)
+        try:
+            self.xy_smearing = self.doubles['xy_smearing']
+            self.m.log(1, "sparse width = {0}".format(self.xy_smearing))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'xy_smearing' not defined.")
+            exit(0)
+
+        # Sparse width
+        try:
+            self.sparse_width = self.ints['sparse_width']
+            self.m.log(1, "sparse width = {0}".format(self.sparse_width))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'sparse_width' not defined.")
+            exit(0)
+
+        # Max. distance between hits in a connected track
+        try:
+            self.ctrack_dist = self.doubles['ctrack_dist']
+            self.m.log(1, "connected track max hit distance ctrack_dist = {0}".format(self.ctrack_dist))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'ctrack_dist' not defined.")
+            exit(0)
+
+
         # Set up the relevant paths.
         self.trk_base = "{0}/{1}".format(self.trk_outdir,self.trk_name)
         self.plt_base = "{0}/plt_curv".format(self.trk_base)
@@ -332,11 +374,16 @@ class Curv(AAlgo):
         self.wcyc = -1.0*(self.pc_eC/self.pc_me)*self.Bfield
       
         # Create the lists to be filled with information from each event.
+        self.l_eblob1 = []
+        self.l_eblob2 = []
         self.l_scurv_mean = []
         self.prof_sgn_kon = []
         self.prof_sgn_vals = []
         self.l_chi2S = []
         self.l_chi2B = []
+
+        # Initialize the flipped tracks counter to 0.
+        self.flip_trk = 0
  
         # Read in and interpolate the profiles if they exist and we are not in profile generation mode.
         if(not self.prof_gen and os.path.isfile(self.prof_sfile) and os.path.isfile(self.prof_bfile)):
@@ -407,36 +454,270 @@ class Curv(AAlgo):
         hOrder = main_trk.fetch_ivstore("MainPathHits")
         #for iord in hOrder: print "{0}, ".format(iord);
 
-        # Get the list of hits.
-        hList = self.event.GetHits()
-        
-        #print "{0} hits in main track, {1} total hits".format(len(hOrder),len(hList))
-        #dpr = dir(main_trk); print dpr
-        
-        # Fill arrays with hit information.
+        # Declare the final track.
         trk_xM_0 = []; trk_yM_0 = []; trk_zM_0 = []
-        trk_nM_0 = []; trk_eM_0 = []
-        nhit = 0
-        #for hit in self.event.GetHits():
-        for ihit in hOrder:
-            trk_xM_0.append(hList[ihit].GetPosition().x())
-            trk_yM_0.append(hList[ihit].GetPosition().y())
-            trk_zM_0.append(hList[ihit].GetPosition().z())
-            trk_eM_0.append(hList[ihit].GetAmplitude())
-            trk_nM_0.append(nhit)
-            nhit = nhit + 1
+        trk_eM_0 = []; trk_nM_0 = []
+        ftrack = []
 
-        #print "First hit at {0}, {1}, {2}".format(hit0.GetPosition().x(),hit0.GetPosition().y(),hit0.GetPosition().z());
-        #print "Last hit at {0}, {1}, {2}".format(hitm1.GetPosition().x(),hitm1.GetPosition().y(),hitm1.GetPosition().z());
-        #print "First hit at {0}, {1}, {2}".format(trk_xM_0[0],trk_yM_0[0],trk_zM_0[0]);
-        #print "Last hit at {0}, {1}, {2}".format(trk_xM_0[-1],trk_yM_0[-1],trk_zM_0[-1]);
+        # Declare the extremes.
+        e1x = 0; e1y = 0; e1z = 0
+        e2x = 0; e2y = 0; e2z = 0
 
-        #e1, e2 = all_trks[0].GetExtremes();
-        #print "First extreme at {0}, {1}, {2}".format(e1.GetPosition().x(),e1.GetPosition().y(),e1.GetPosition().z());
-        #print "Last extreme at {0}, {1}, {2}".format(e2.GetPosition().x(),e2.GetPosition().y(),e2.GetPosition().z());
+        # Use the voxelized hits if the option is set.
+        if(self.use_voxels == 1): 
 
-        # Reverse the hits if they are not in the correct order.
+            # Get the list of hits.
+            hList = self.event.GetHits()
 
+            # Get the single track for this event.
+            main_trk = all_trks[0]
+
+            # Get the order of the hits determined by Paolina.
+            hOrder = main_trk.fetch_ivstore("MainPathHits")
+            #for iord in hOrder: print "{0}, ".format(iord);
+
+            # Fill the final track on which the calculation is to be performed.
+            for ihit in hOrder:
+                ftrack.append(hList[ihit])
+
+            # Get the extremes.
+            e1, e2 = main_trk.GetExtremes()
+            e1x = e1.GetPosition().x(); e1y = e1.GetPosition().y(); e1z = e1.GetPosition().z()
+            e2x = e2.GetPosition().x(); e2y = e2.GetPosition().y(); e2z = e2.GetPosition().z()
+
+            # Fill the coordinate arrays with the main track hits.
+            nhit = 0
+            for fhit in ftrack:
+                trk_xM_0.append(fhit.GetPosition().x())
+                trk_yM_0.append(fhit.GetPosition().y())
+                trk_zM_0.append(fhit.GetPosition().z())
+                trk_eM_0.append(fhit.GetAmplitude())
+                trk_nM_0.append(nhit)
+                nhit = nhit + 1
+
+        else:
+
+            # Get the list of all MC hits.
+            hList = self.event.GetMCHits()
+
+            # Get the MC tracks.
+            mcTracks = self.event.GetMCTracks()
+
+            # Find the energy of the most energetic and second-most energetic tracks.
+            ifirst = -1; isecond = -1
+            efirst = -1.; esecond = -1.
+            nmctrk = 0
+
+            for mctrk in mcTracks:
+                trk_en = mctrk.GetHitsEnergy()
+                print "-- MC track with energy {0}".format(trk_en)
+                if(trk_en > efirst):
+                    isecond = ifirst; esecond = efirst
+                    ifirst = nmctrk; efirst = trk_en
+                elif(trk_en > esecond):
+                    isecond = nmctrk; esecond = trk_en
+                nmctrk += 1
+            if(nmctrk == 0):
+                print "(Track {0}): ERROR - no MC tracks are present.".format(trk_num)
+            if(nmctrk > 2):
+                print "(Track {0}): WARNING - more than 2 MC tracks are present.".format(trk_num)
+
+            #print "Found most energetic index {0}, E1 = {1}; second-most energetic index {2}, E2 = {3}".format(ifirst,efirst,isecond,esecond)
+
+            ftrk = mcTracks[ifirst]
+            ft_hits = ftrk.GetHits()
+
+            # Add the least energetic electron track first (in reverse), if there is one.
+            mainHits = [] 
+            if(nmctrk > 1):
+                strk = mcTracks[isecond]
+                st_hits = strk.GetHits()
+                for ihit in range(len(st_hits)):
+                    mainHits.append(st_hits[len(st_hits)-1-ihit])
+            #else:
+            #    print "(Track {0}): WARNING - only one energetic electron track".format(trk_num)
+
+            # Add the most energetic electron track.
+            for ihit in range(len(ft_hits)):
+                mainHits.append(ft_hits[ihit])
+            
+            # Determine the longest connected track.
+            ctracks = []; ctrack_t = []
+            ihit = 0; itrk = 0
+            ctrack_t.append(mainHits[0])
+            while(ihit < len(mainHits)-1):
+                 h1 = mainHits[ihit]
+                 h2 = mainHits[ihit+1]
+
+                 # Get the distance between the consecutive hits.
+                 x1 = h1.GetPosition().x(); y1 = h1.GetPosition().y(); z1 = h1.GetPosition().z()
+                 x2 = h2.GetPosition().x(); y2 = h2.GetPosition().y(); z2 = h2.GetPosition().z()
+                 hdist = sqrt((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2)
+                 #print "--- Distance between consecutive hits is {0} mm".format(hdist)
+      
+                 # Add the next hit to the current connected track if it is connected.
+                 if(hdist < self.ctrack_dist):
+                     ctrack_t.append(h2);
+                 # Otherwise, start a new connected track.
+                 else:
+                     ctracks.append(ctrack_t)
+                     ctrack_t = []
+                     ctrack_t.append(h2)
+                 
+                 ihit += 1
+
+            # Add the final connected track to the list.
+            ctracks.append(ctrack_t)
+
+            # Get the list of hits containing the longest connected track.
+            ilct = -1; llct = -1
+            itrk = 0
+            for ctrk in ctracks:
+                ltrk = len(ctrk)
+                if(ltrk > llct):
+                    ilct = itrk
+                    llct = ltrk
+                itrk += 1
+            ftrack = ctracks[ilct]
+
+            print "(Track {0}): -- Found {1} connected tracks, of which longest has {2} hits".format(trk_num,len(ctracks),len(ctracks[ilct]))
+            #for ctrk in ctracks:
+            #    print "-> Track with {0} hits".format(len(ctrk))
+
+            # Fill the coordinate arrays with the main track hits.
+            trk_xM_true = []; trk_yM_true = []; trk_zM_true = []
+            trk_nM_true = []; trk_eM_true = []
+            nhit = 0
+            for fhit in ftrack:
+                trk_xM_true.append(fhit.GetPosition().x())
+                trk_yM_true.append(fhit.GetPosition().y())
+                trk_zM_true.append(fhit.GetPosition().z())
+                trk_eM_true.append(fhit.GetAmplitude())
+                trk_nM_true.append(nhit)
+                nhit = nhit + 1
+
+            # Apply sparsing if specified.
+            trk_xM_sp = []; trk_yM_sp = []; trk_zM_sp = []
+            trk_nM_sp = []; trk_eM_sp = []
+            if(self.sparse_width > 1):
+
+                ihit = 0; nhit = 0
+                while(ihit < len(trk_xM_true)):
+
+                    sp = ihit
+
+                    # Create an effective (sparsed) hit.
+                    xeff = 0.; yeff = 0.; zeff = 0.; eeff = 0.
+                    while(sp < len(trk_xM_true) and sp < (ihit + self.sparse_width)):
+                        ehit = trk_eM_true[sp]
+                        xeff += trk_xM_true[sp]*ehit
+                        yeff += trk_yM_true[sp]*ehit
+                        zeff += trk_zM_true[sp]*ehit
+                        eeff += ehit
+                        sp += 1
+                    ihit += self.sparse_width
+
+                    # Finish calculating effective coordinates.
+                    xeff /= eeff
+                    yeff /= eeff
+                    zeff /= eeff
+
+                    # Record the values in lists for the sparsed track.
+                    trk_xM_sp.append(xeff)
+                    trk_yM_sp.append(yeff)
+                    trk_zM_sp.append(zeff)
+                    trk_eM_sp.append(eeff)
+                    trk_nM_sp.append(nhit)
+
+                    nhit += 1
+            else:
+                trk_xM_sp = trk_xM_true
+                trk_yM_sp = trk_yM_true
+                trk_zM_sp = trk_zM_true
+                trk_eM_sp = trk_eM_true
+                trk_nM_sp = trk_nM_true
+
+            # Apply smearing if specified.
+            if(self.xy_smearing > 0):
+
+                for xm,ym,zm,em,nm in zip(trk_xM_sp,trk_yM_sp,trk_zM_sp,trk_eM_sp,trk_nM_sp):
+                    xsm = rd.gauss(xm,self.xy_smearing)
+                    ysm = rd.gauss(ym,self.xy_smearing)
+                    trk_xM_0.append(xsm)
+                    trk_yM_0.append(ysm)
+                    trk_zM_0.append(zm)
+                    trk_eM_0.append(em)
+                    trk_nM_0.append(nm)
+            else:
+                trk_xM_0 = trk_xM_sp
+                trk_yM_0 = trk_yM_sp
+                trk_zM_0 = trk_zM_sp
+                trk_eM_0 = trk_eM_sp
+                trk_nM_0 = trk_nM_sp 
+
+            # Set the extremes.
+            e1x = trk_xM_0[0]; e1y = trk_yM_0[0]; e1z = trk_zM_0[0]
+            e2x = trk_xM_0[-1]; e2y = trk_yM_0[-1]; e2z = trk_zM_0[-1]
+
+        # Determine two blob energies.
+        eblob1 = 0.; eblob2 = 0.
+        #for hhit in hList:
+        for xh,yh,zh,eh in zip(trk_xM_0,trk_yM_0,trk_zM_0,trk_eM_0):
+
+            d1 = sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
+            d2 = sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
+           
+            if(d1 < self.blob_radius):
+                eblob1 += eh
+            if(d2 < self.blob_radius):
+                eblob2 += eh
+
+        # Add the more energetic blob as blob1.
+        if(eblob1 > eblob2):
+            self.l_eblob1.append(eblob1)
+            self.l_eblob2.append(eblob2)
+        else:
+            self.l_eblob1.append(eblob2)
+            self.l_eblob2.append(eblob1)
+
+        # Determine if the blobs overlap.
+        dblobs = sqrt((e1x-e2x)**2 + (e1y-e2y)**2 + (e1z-e2z)**2)
+        if(dblobs < self.blob_radius):
+            print "(Track {0}) WARNING: blobs overlap for track!".format(trk_num)
+
+        # Determine which extreme corresponds to which blob.
+        blob1 = 0; blob2 = 0
+        if(sqrt((e1x-trk_xM_0[0])**2 + (e1y-trk_yM_0[0])**2 + (e1z-trk_zM_0[0])**2) < 0.001):
+            blob1 = 1
+        elif(sqrt((e1x-trk_xM_0[-1])**2 + (e1y-trk_yM_0[-1])**2 + (e1z-trk_zM_0[-1])**2) < 0.001):
+            blob2 = 1
+        if(sqrt((e2x-trk_xM_0[0])**2 + (e2y-trk_yM_0[0])**2 + (e2z-trk_zM_0[0])**2) < 0.001):
+            blob1 = 2
+        elif(sqrt((e2x-trk_xM_0[-1])**2 + (e2y-trk_yM_0[-1])**2 + (e2z-trk_zM_0[-1])**2) < 0.001):
+            blob2 = 2
+
+        # Print a warning if we have an unusual blob identification.
+        if(blob1 != 1 or blob2 != 2):
+            print "(Track {0}) WARNING: Blob1 = {1} and blob2 = {2}".format(trk_num,blob1,blob2);
+
+        # Print an error if we have an invalid blob identification.
+        if(blob1 == 0):
+            self.m.log("***ERROR (Track {0}) Blob1 never assigned to an extreme".format(trk_num))
+        if(blob2 == 0):
+            self.m.log("***ERROR (Track {0}) Blob2 never assigned to an extreme".format(trk_num))
+        if(blob1 == blob2):
+            self.m.log("***ERROR (Track {0}) Blob1 and blob2 assigned to the same extreme".format(trk_num))
+
+        # Decide on whether we will need to flip the track.
+        if(self.blob_ordering and ((blob1 == 1 and blob2 == 2 and eblob2 < eblob1) or (blob1 == 2 and blob2 == 1 and eblob1 < eblob2))):
+            trk_xM_0.reverse()
+            trk_yM_0.reverse()
+            trk_zM_0.reverse()
+            trk_eM_0.reverse()
+            print "(Track {0}) Flipping track due to blob at extreme 2 containing less energy than blob at extreme 1.".format(trk_num)
+            self.flip_trk += 1
+
+        #print "Extreme 2 at ({0},{1},{2})".format(e2x,e2y,e2z)
 
         # Design the LPF.
         #ux0 = trk_ux[0]; uy0 = trk_uy[0]; print "ux = {0}, uy = {1}".format(ux0,uy0);
@@ -608,6 +889,7 @@ class Curv(AAlgo):
             kon += 1
 
         # Calculate the profile comparison factors.
+        chi2S = 1.0; chi2B = -1.0
         if(self.prof_cf):
 
             # Compute the fchi2F and fchi2R.
@@ -824,7 +1106,7 @@ class Curv(AAlgo):
             for lb in (lb_x + lb_y + lb_z):
                 lb.set_fontsize(8);
 
-            plt.title("Unfiltered");
+            plt.title("Unfiltered: $\chi^2_B/\chi^2_S = $ {0}".format(chi2B/chi2S));
             cb8 = plt.colorbar(s8);
             #cb8.set_label('Hit energy (keV)');
             cb8.set_label('Hit number');
@@ -865,6 +1147,27 @@ class Curv(AAlgo):
         return True
 
     def finalize(self):
+
+
+        # Make the plot of blob energy 1 vs. blob energy 2.
+        fig = plt.figure(7);
+        fig.set_figheight(5.0);
+        fig.set_figwidth(7.5);
+
+        #ax1 = fig.add_subplot(111);
+        #ax1.plot(self.l_eblob1,self.l_eblob2,'.',color='black');
+        hblobs, xblobs, yblobs = np.histogram2d(self.l_eblob2, self.l_eblob1, bins=(50, 50));
+        #extent = [yblobs[0], yblobs[-1], yblobs[0], yblobs[-1]]
+        extent = [yblobs[0], yblobs[-1], xblobs[0], xblobs[-1]]
+        plt.imshow(hblobs, extent=extent, interpolation='nearest', aspect='auto', origin='lower')
+        #plt.axis([yblobs[0],yblobs[-1],yblobs[0],yblobs[-1]])
+        plt.xlabel("Blob 1 Energy (MeV)");
+        plt.ylabel("Blob 2 Energy (MeV)");
+        plt.savefig("{0}/blob_energies_{1}.pdf".format(self.plt_base,self.trk_name), bbox_inches='tight');
+        plt.close();
+
+        # Print out the number of tracks that were flipped.
+        print "Flipped {0} tracks".format(self.flip_trk)
  
         # Output the list of mean curvature values and fraction of positive curvature values.
         if(self.output_means):
@@ -929,7 +1232,7 @@ class Curv(AAlgo):
                 l_bprofy_sm.append(bval-sbval);
 
             # Create plots of the sign vs. N profiles.
-            fig = plt.figure(3);
+            fig = plt.figure(8);
             fig.set_figheight(5.0);
             fig.set_figwidth(7.5);
 
