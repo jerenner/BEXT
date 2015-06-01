@@ -1,3 +1,13 @@
+#
+# Curv.py
+#
+# Algorithm for performing curvature-based single-electron vs. double-beta track
+# discrimination.
+#
+# Notes:
+# - the extremes returned by Paolina coincide with the beginning and end of
+#   the main track hits (elements [0] and [-1] of the corresponding array)
+#
 
 import os
 import numpy as np
@@ -279,7 +289,8 @@ class Curv(AAlgo):
         self.pc_NA = NA               # Avogadro constant
         self.pc_eC = e_SI             # electron charge in C
         self.pc_me = 9.10938215e-31   # electron mass in kg
-        self.pc_clight = c_light      # speed of light in m/s
+        self.pc_clight = 2.99792458e8 # speed of light in m/s
+        print "Speed of light is {0} m/s".format(c_light)
 
         # Misc. options
         self.grdcol = 0.98
@@ -374,6 +385,7 @@ class Curv(AAlgo):
         self.wcyc = -1.0*(self.pc_eC/self.pc_me)*self.Bfield
       
         # Create the lists to be filled with information from each event.
+        self.l_evtnum = []
         self.l_eblob1 = []
         self.l_eblob2 = []
         self.l_scurv_mean = []
@@ -381,6 +393,8 @@ class Curv(AAlgo):
         self.prof_sgn_vals = []
         self.l_chi2S = []
         self.l_chi2B = []
+        self.l_nhits = []
+        self.l_bflip = []
 
         # Initialize the flipped tracks counter to 0.
         self.flip_trk = 0
@@ -440,6 +454,7 @@ class Curv(AAlgo):
 
         # Get the event number.
         trk_num = self.event.GetEventID()
+        self.l_evtnum.append(trk_num)
 
         # Get all tracks from the voxelization step. 
         all_trks = self.event.GetTracks()
@@ -476,6 +491,10 @@ class Curv(AAlgo):
             hOrder = main_trk.fetch_ivstore("MainPathHits")
             #for iord in hOrder: print "{0}, ".format(iord);
 
+            # Get the computed distances.
+            distExtFirst = main_trk.fetch_dvstore("DistExtFirst")
+            distExtSecond = main_trk.fetch_dvstore("DistExtSecond")
+
             # Fill the final track on which the calculation is to be performed.
             for ihit in hOrder:
                 ftrack.append(hList[ihit])
@@ -487,6 +506,7 @@ class Curv(AAlgo):
 
             # Fill the coordinate arrays with the main track hits.
             nhit = 0
+            trk_hitID = []
             for fhit in ftrack:
                 trk_xM_0.append(fhit.GetPosition().x())
                 trk_yM_0.append(fhit.GetPosition().y())
@@ -494,6 +514,24 @@ class Curv(AAlgo):
                 trk_eM_0.append(fhit.GetAmplitude())
                 trk_nM_0.append(nhit)
                 nhit = nhit + 1
+
+            # Determine two blob energies.
+            eblob1 = 0.; eblob2 = 0.
+            for hhit in hList:
+
+                d1 = distExtFirst[hhit.GetID()]  # sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
+                d2 = distExtSecond[hhit.GetID()] # sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
+                eh = hhit.GetAmplitude()
+
+                if(d1 < self.blob_radius):
+                    eblob1 += eh
+                if(d2 < self.blob_radius):
+                    eblob2 += eh
+
+            # Ensure the extremes are the ends of ftrack
+            print "Extreme 1 ID = {0}, beginning of ftrack ID = {1}".format(e1.GetID(),ftrack[0].GetID())
+            print "Extreme 2 ID = {0}, end of ftrack ID = {1}".format(e2.GetID(),ftrack[-1].GetID())
+            
 
         else:
 
@@ -659,18 +697,21 @@ class Curv(AAlgo):
             e1x = trk_xM_0[0]; e1y = trk_yM_0[0]; e1z = trk_zM_0[0]
             e2x = trk_xM_0[-1]; e2y = trk_yM_0[-1]; e2z = trk_zM_0[-1]
 
-        # Determine two blob energies.
-        eblob1 = 0.; eblob2 = 0.
-        #for hhit in hList:
-        for xh,yh,zh,eh in zip(trk_xM_0,trk_yM_0,trk_zM_0,trk_eM_0):
+            # Determine two blob energies.
+            eblob1 = 0.; eblob2 = 0.
+            #for hhit in hList:
+            for xh,yh,zh,eh in zip(trk_xM_0,trk_yM_0,trk_zM_0,trk_eM_0):
 
-            d1 = sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
-            d2 = sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
+                d1 = sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
+                d2 = sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
            
-            if(d1 < self.blob_radius):
-                eblob1 += eh
-            if(d2 < self.blob_radius):
-                eblob2 += eh
+                if(d1 < self.blob_radius):
+                    eblob1 += eh
+                if(d2 < self.blob_radius):
+                    eblob2 += eh
+
+        # Record the number of hits used in this analysis.
+        self.l_nhits.append(len(trk_xM_0))
 
         # Add the more energetic blob as blob1.
         if(eblob1 > eblob2):
@@ -716,6 +757,9 @@ class Curv(AAlgo):
             trk_eM_0.reverse()
             print "(Track {0}) Flipping track due to blob at extreme 2 containing less energy than blob at extreme 1.".format(trk_num)
             self.flip_trk += 1
+            self.l_bflip.append(1)
+        else:
+            self.l_bflip.append(0)
 
         #print "Extreme 2 at ({0},{1},{2})".format(e2x,e2y,e2z)
 
@@ -1174,11 +1218,9 @@ class Curv(AAlgo):
 
             print "Writing file with {0} entries...".format(len(self.l_scurv_mean))
             fm = open("{0}/scurv_means.dat".format(self.plt_base),"w")
-            fm.write("# (trk) (asymm) (chi2s) (chi2b)\n")
-            ntrk = 0
-            for scurv,chi2s,chi2b in zip(self.l_scurv_mean,self.l_chi2S,self.l_chi2B):
-                fm.write("{0} {1} {2} {3}\n".format(ntrk,scurv,chi2s,chi2b))
-                ntrk += 1
+            fm.write("# (trk) (asymm) (chi2s) (chi2b) (nhits) (Eblob1) (Eblob2) (blob flipped)\n")
+            for evtnum,scurv,chi2s,chi2b,nhits,eblob1,eblob2,bflip in zip(self.l_evtnum,self.l_scurv_mean,self.l_chi2S,self.l_chi2B,self.l_nhits,self.l_eblob1,self.l_eblob2,self.l_bflip):
+                fm.write("{0} {1} {2} {3} {4} {5} {6} {7}\n".format(evtnum,scurv,chi2s,chi2b,nhits,eblob1,eblob2,bflip))
             fm.close()
 
         # Generate the profiles.
