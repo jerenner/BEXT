@@ -1,0 +1,192 @@
+#!/usr/bin/perl
+## ---------------------------------------------------------------------------------
+## plt_pdf
+## ---------------------------------------------------------------------------------
+## 
+## - Converts .obj files to .u3d format
+## - Generates LaTeX file
+## - Runs LaTeX to produce .pdf
+##
+## ---------------------------------------------------------------------------------
+use POSIX;
+$debug = 1;       # debug output for this script
+
+$se_events = 0;
+
+# Path to track output directory.
+$base_dir = "/Users/jrenner/IFIC/nmag_runs/nmag2/centella/tracks";
+
+if($se_events == 1) {
+    $trk_name = "nmagse2";
+    $trk_dir = "$base_dir/tracks_se";
+    @evts = (34, 62, 194, 204, 285, 299, 358, 372, 551, 631, 825, 969, 1912, 1926, 1949);
+}
+else {
+    $trk_name = "nmagbb2";
+    $trk_dir = "$base_dir/tracks_bb";
+    @evts = (39, 119, 135, 146, 192, 212, 271, 288, 412, 857);
+}
+# ----------------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------------
+# Set up the base directories
+# ----------------------------------------------------------------------------------
+$PATH_MC = "$trk_dir/mctruth";
+$PATH_VOX = "$trk_dir/voxels";
+$PATH_REC = "$trk_dir/reconstructed";
+
+# Loop over all run numbers.
+foreach $evt (@evts) {
+
+    print " *** Event $evt\n";
+
+    # Iterate through each type of file (MC, VOX, REC).
+    foreach $ftype ("MC", "VOX", "REC") {
+
+        # Determine the type of track we are plotting in this iteration.
+        if($ftype eq "MC") {
+            $PATH_CURR = $PATH_MC;
+            $mfile_base = "mctrk_3d_$trk_name" . "_$evt";
+        }
+        elsif($ftype eq "VOX") {
+            $PATH_CURR = $PATH_VOX;
+            $mfile_base = "vtrk_3d_$trk_name" . "_$evt";
+        }
+        elsif($ftype eq "REC") {
+            $PATH_CURR = $PATH_REC;
+            $mfile_base = "rtrk_3d_$trk_name" . "_$evt";
+        }
+        else {
+            die "Invalid track type.";
+        }
+
+        print "--- ftype = $ftype, current path = $PATH_CURR\n";
+
+        # Make sure the directory structure is present.
+        $dir_tex = "$PATH_CURR/tex";
+        if($debug) { print "Creating directory structure...\n"; }
+        if(!(-d $dir_tex)) {
+            system("mkdir $dir_tex"); print "--> Created $dir_tex\n";
+            print "Done.\n\n";
+        }
+
+        # Convert the .obj file to .u3d format.
+        my $obj_fname = "$PATH_CURR/3dmesh/$mfile_base.obj";
+        my $u3d_fname = "$PATH_CURR/3dmesh/$mfile_base.u3d";
+        print "--- Converting $obj_fname to $u3d_fname\n";
+        system("meshlabserver -i $obj_fname -o $u3d_fname -om vc"); 
+
+    } 
+
+    # Construct the name of the .tex file.
+    my $tex_fname = "$base_dir/tex/plots_$trk_name" . "_$evt.tex";
+    print "--- Writing .tex file $tex_fname\n";
+
+    # Write the .tex file
+    my $mc_u3df = "mctrk_3d_$trk_name" . "_$evt.u3d";
+    my $mc_3df = "plt_mctrk_3d_$trk_name" . "_$evt.pdf";
+    my $mc_xyprojf = "plt_mctrk_xy_$trk_name" . "_$evt.pdf";
+    my $mc_xzprojf = "plt_mctrk_xz_$trk_name" . "_$evt.pdf";
+    my $mc_yzprojf = "plt_mctrk_yz_$trk_name" . "_$evt.pdf";
+
+    my $vox_u3df = "vtrk_3d_$trk_name" . "_$evt.u3d";
+    my $vox_3df = "plt_vtrk_3d_$trk_name" . "_$evt.pdf";
+    my $vox_xyprojf = "plt_vtrk_xy_$trk_name" . "_$evt.pdf";
+    my $vox_xzprojf = "plt_vtrk_xz_$trk_name" . "_$evt.pdf";
+    my $vox_yzprojf = "plt_vtrk_yz_$trk_name" . "_$evt.pdf";
+
+    my $rc_u3df = "rtrk_3d_$trk_name" . "_$evt.u3d";
+    my $rc_3df = "plt_rtrk_3d_$trk_name" . "_$evt.pdf";
+    my $rc_xyprojf = "plt_rtrk_xy_$trk_name" . "_$evt.pdf";
+    my $rc_xzprojf = "plt_rtrk_xz_$trk_name" . "_$evt.pdf";
+    my $rc_yzprojf = "plt_rtrk_yz_$trk_name" . "_$evt.pdf";
+
+    open(F_TEX, "> $tex_fname");
+    print "Printing configuration file for run $s...\n";
+    print F_TEX <<ENDFILE;
+\\documentclass[a4paper]{article}
+
+\\oddsidemargin 0.0in
+\\evensidemargin 0.0in
+\\textwidth 6.0in
+\\topmargin 0.0in
+\\footskip 20pt
+\\textheight 8.5in
+
+\\pagenumbering{gobble}
+
+\\usepackage[3D]{movie15}
+\\usepackage{hyperref}
+\\usepackage{graphicx,pdflscape}
+\\usepackage[UKenglish]{babel}
+\\begin{document}
+	
+\\begin{landscape}
+
+\\begin{figure}[!htb]
+	\\centering
+	\\includemovie[
+	poster,
+	toolbar, %same as `controls'
+	label=mctruth3dtrack,
+	text=(mctrk3d.u3d),
+	3Daac=60.000000, 3Droll=-37.96, 3Dc2c=-15.3 87.94 -52.02, 3Droo=100.00, 3Dcoo=0.00 0.00 0.00,
+	3Dlights=CAD,
+	]{250pt}{250pt}{$PATH_MC/3dmesh/$mc_u3df}
+	\\includegraphics[width= 350pt]{$PATH_MC/3dplt/$mc_3df}
+	\\includegraphics[width= 200pt]{$PATH_MC/xyproj/$mc_xyprojf}
+	\\includegraphics[width= 200pt]{$PATH_MC/xzproj/$mc_xzprojf}
+	\\includegraphics[width= 200pt]{$PATH_MC/yzproj/$mc_yzprojf}
+	\\caption{Track consisting of true Monte Carlo hits}
+\\end{figure}
+
+\\newpage
+
+\\begin{figure}[!htb]
+	\\centering
+	\\includemovie[
+	poster,
+	toolbar, %same as `controls'
+	label=voxelized3dtrack,
+	text=(voxtrk3d.u3d),
+	3Daac=60.000000, 3Droll=-37.96, 3Dc2c=-15.3 87.94 -52.02, 3Droo=100.00, 3Dcoo=0.00 0.00 0.00,
+	3Dlights=CAD,
+	]{250pt}{250pt}{$PATH_VOX/3dmesh/$vox_u3df}
+	\\includegraphics[width= 350pt]{$PATH_VOX/3dplt/$vox_3df}
+	\\includegraphics[width= 200pt]{$PATH_VOX/xyproj/$vox_xyprojf}
+	\\includegraphics[width= 200pt]{$PATH_VOX/xzproj/$vox_xzprojf}
+	\\includegraphics[width= 200pt]{$PATH_VOX/yzproj/$vox_yzprojf}
+	\\caption{Voxelized track}
+\\end{figure}
+
+\\newpage
+
+\\begin{figure}[!htb]
+	\\centering
+	\\includemovie[
+	poster,
+	toolbar, %same as `controls'
+	label=rec3dtrack,
+	text=(rectrk3d.u3d),
+	3Daac=60.000000, 3Droll=-37.96, 3Dc2c=-15.3 87.94 -52.02, 3Droo=100.00, 3Dcoo=0.00 0.00 0.00,
+	3Dlights=CAD,
+	]{250pt}{250pt}{$PATH_REC/3dmesh/$rc_u3df}
+	\\includegraphics[width= 350pt]{$PATH_REC/3dplt/$rc_3df}
+	\\includegraphics[width= 200pt]{$PATH_REC/xyproj/$rc_xyprojf}
+	\\includegraphics[width= 200pt]{$PATH_REC/xzproj/$rc_xzprojf}
+	\\includegraphics[width= 200pt]{$PATH_REC/yzproj/$rc_yzprojf}
+	\\caption{Reconstructed track: the true extremes of the track are shown using green (beginning) and black (end) arrows}
+\\end{figure}
+
+
+\\end{landscape}
+
+\\end{document}
+ENDFILE
+close(F_TEX);
+
+    # Execute pdflatex
+    print "--- Executing pdflatex on $tex_fname\n";
+    system("pdflatex -output-directory=$base_dir/pdf $tex_fname");
+
+}
