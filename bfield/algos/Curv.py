@@ -9,6 +9,7 @@
 #   the main track hits (elements [0] and [-1] of the corresponding array)
 #
 
+import networkx as nx
 import os
 import numpy as np
 import random as rd
@@ -19,6 +20,7 @@ import matplotlib.colors as mpcol
 import matplotlib.cm as cmx
 from mpl_toolkits.mplot3d import Axes3D
 from math import *
+from collections import deque
 from scipy.interpolate import interp1d
 from Centella.AAlgo import AAlgo
 from Centella.physical_constants import *
@@ -28,6 +30,55 @@ gSystem.Load("$GATE_DIR/lib/libGATE")
 gSystem.Load("$GATE_DIR/lib/libGATEIO")
 gSystem.Load("$GATE_DIR/lib/libGATEUtils")
 from ROOT import gate
+
+debug = 2;
+
+# TrackNode class
+#  Node types:
+#   0: normal
+#   1: end node
+#   2: vertex/branch point
+#   3: end node that should be connected to another part of the track
+#       (node specified as "link")
+class TrackNode:    
+    
+    # Creates a new TrackNode
+    def __init__(self,idnum):
+        self.id = idnum;
+        self.visited = False;
+        self.type = 0;
+        self.link = -1;  # node to which this is connected for type 3
+        
+    def __repr__(self):
+        return "Node {0}, type {1}, visited {2}".format(self.id,self.type,self.visited);
+
+    def __str__(self):
+        return "Node {0}, type {1}, visited {2}".format(self.id,self.type,self.visited);
+        
+# TrackSegment class
+class TrackSegment:
+        
+    # Creates a new TrackSegment with specified start and end nodes.
+    def __init__(self,inode,fnode):
+        self.inode = inode;
+        self.fnode = fnode;
+        self.path = [];
+        self.length = 0.0;
+        
+    def set_path(self,pth):
+        self.path = pth;
+        self.inode = pth[0];
+        self.fnode = pth[-1];
+    
+    def set_len(self,length):
+        self.length = length;
+   
+    def __repr__(self):
+        return "Segment: node {0} (type {1}) to node {2} (type {3}), len {4}, path len {5}".format(self.inode.id,self.inode.type,self.fnode.id,self.fnode.type,len(self.path),self.length);
+     
+    def __str__(self):
+        return "Segment: node {0} (type {1}) to node {2} (type {3}), len {4}, path len {5}".format(self.inode.id,self.inode.type,self.fnode.id,self.fnode.type,len(self.path),self.length);
+
 
 class Curv(AAlgo):
 
@@ -111,6 +162,14 @@ class Curv(AAlgo):
             self.m.log(1, "WARNING!! Parameter: 'blob_ordering' not defined.")
             exit(0)
 
+        # Flag for determining start/end of track using the sign of the second half of the track.
+        try:
+            self.sign_ordering = self.ints['sign_ordering']
+            self.m.log(1, "Use sign ordering = {0}".format(self.sign_ordering))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'sign_ordering' not defined.")
+            exit(0)
+
         # Initial kinetic energy (MeV)
         try:
             self.KEinit = self.doubles['KEinit']
@@ -152,7 +211,7 @@ class Curv(AAlgo):
             self.prof_cf = False
             if(self.par_prof_cf == 1):
                 self.prof_cf = True
-            self.m.log(1, "Profile generation = {0}".format(self.prof_cf))
+            self.m.log(1, "Profile comparison = {0}".format(self.prof_cf))
         except KeyError:
             self.m.log(1, "WARNING!! Parameter: 'prof_cf' not defined.")
             exit(0)
@@ -199,6 +258,17 @@ class Curv(AAlgo):
             self.m.log(1, "Verify extremes with MC truth = {0}".format(self.output_means))
         except KeyError:
             self.m.log(1, "WARNING!! Parameter: 'verify_extremes' not defined.")
+            exit(0)
+
+        # Print the list of voxels to a file for each main track.
+        try:
+            self.par_print_track = self.ints['print_track']
+            self.print_track = False
+            if(self.par_print_track == 1):
+                self.print_track = True
+            self.m.log(1, "Print voxels = {0}".format(self.print_track))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'print_track' not defined.")
             exit(0)
 
         # Fixed filter boolean
@@ -284,6 +354,13 @@ class Curv(AAlgo):
             self.m.log(1, "WARNING!! Parameter: 'ctrack_dist' not defined.")
             exit(0)
 
+        # Track ordering method
+        try:
+            self.trk_omethod = self.ints['trk_omethod']
+            self.m.log(1, "track ordering method trk_omethod = {0}".format(self.trk_omethod))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'trk_omethod' not defined.")
+            exit(0)
 
         # Set up the relevant paths.
         self.trk_base = "{0}/{1}".format(self.trk_outdir,self.trk_name)
@@ -411,7 +488,9 @@ class Curv(AAlgo):
         self.l_chi2S = []
         self.l_chi2B = []
         self.l_nhits = []
+        self.l_nvoxels = []
         self.l_bflip = []
+        self.l_sflip = []
         self.l_correct_extremes = []
         self.l_dt1c1 = []
         self.l_dt2c2 = []
@@ -485,7 +564,6 @@ class Curv(AAlgo):
 
         # Get the event number.
         trk_num = self.event.GetEventID()
-        self.l_evtnum.append(trk_num)
 
         # Get all tracks from the voxelization step. 
         all_trks = self.event.GetTracks()
@@ -497,7 +575,7 @@ class Curv(AAlgo):
         if(self.verify_extremes or self.use_voxels == 0):
 
             # Get the list of all MC hits.
-            hList = self.event.GetMCHits()
+            #hList = self.event.GetMCHits()
 
             # Get the MC tracks.
             mcTracks = self.event.GetMCTracks()
@@ -508,18 +586,19 @@ class Curv(AAlgo):
             nmctrk = 0
 
             for mctrk in mcTracks:
-                trk_en = mctrk.GetHitsEnergy()
+                trk_en = mctrk.GetHitsEnergy();
                 print "-- MC track with energy {0}".format(trk_en)
-                if(trk_en > efirst):
-                    isecond = ifirst; esecond = efirst
-                    ifirst = nmctrk; efirst = trk_en
-                elif(trk_en > esecond):
-                    isecond = nmctrk; esecond = trk_en
-                nmctrk += 1
+                if(mctrk.GetParticle().IsPrimary()):
+                    if(trk_en > efirst):
+                        isecond = ifirst; esecond = efirst
+                        ifirst = nmctrk; efirst = trk_en
+                    elif(trk_en > esecond):
+                        isecond = nmctrk; esecond = trk_en
+                    nmctrk += 1
             if(nmctrk == 0):
-                print "(Track {0}): ERROR - no MC tracks are present.".format(trk_num)
+                print "(Track {0}): ERROR - no primary MC tracks are present.".format(trk_num)
             if(nmctrk > 2):
-                print "(Track {0}): WARNING - more than 2 MC tracks are present.".format(trk_num)
+                print "(Track {0}): WARNING - more than 2 primary MC tracks are present.".format(trk_num)
 
             #print "Found most energetic index {0}, E1 = {1}; second-most energetic index {2}, E2 = {3}".format(ifirst,efirst,isecond,esecond)
 
@@ -581,6 +660,15 @@ class Curv(AAlgo):
             ##ftrack = mcTracks[ifirst].GetHits()
             ftrack = mainHits
 
+            if(self.print_track):
+
+                print "Printing list of MC truth hits for track {0} ...".format(trk_num)
+                fm = open("{0}/mctruehits_trk_{1}.dat".format(self.plt_base,trk_num),"w")
+                #fm.write("# (ID) (x) (y) (z) (E)\n")
+                for hhit in mainHits:
+                    fm.write("{0} {1} {2} {3} {4}\n".format(hhit.GetID(),hhit.GetPosition().x(),hhit.GetPosition().y(),hhit.GetPosition().z(),hhit.GetAmplitude()))
+                fm.close()
+
             # Set the MC truth extremes
             e1_t = ftrack[0]; e2_t = ftrack[-1] 
             e1x_t = e1_t.GetPosition().x(); e1y_t = e1_t.GetPosition().y(); e1z_t = e1_t.GetPosition().z()
@@ -609,29 +697,86 @@ class Curv(AAlgo):
                 self.m.log("ERROR: Event has more than 1 track.")
                 exit(0)
 
-            # Get the list of hits.
-            hList = self.event.GetHits()
-
             # Get the single track for this event.
             main_trk = all_trks[0]
+            if(len(main_trk.GetHits()) != len(self.event.GetHits())):
+                self.m.log("ERROR: Number of main track hits is not equal to the number of hits in the event.")
+                exit(0)
 
-            # Get the order of the hits determined by Paolina.
-            hOrder = main_trk.fetch_ivstore("MainPathHits")
-            #for iord in hOrder: print "{0}, ".format(iord);
+            trk_hits = main_trk.GetHits()
 
-            # Get the computed distances.
-            distExtFirst = main_trk.fetch_dvstore("DistExtFirst")
-            distExtSecond = main_trk.fetch_dvstore("DistExtSecond")
+            if(self.print_track):
 
-            # Fill the final track on which the calculation is to be performed.
-            for ihit in hOrder:
-                ftrack.append(hList[ihit])
+                # Print all voxels to a file.
 
-            # Get the extremes.
-            e1, e2 = main_trk.GetExtremes()
+                # Get the main path hits.
+                if(self.trk_omethod == 2):
+                    hMainPath = main_trk.fetch_ivstore("MSTHits")
+                # Consider the main path to be determined by Paolina by default.
+                else:
+                    hMainPath = main_trk.fetch_ivstore("MainPathHits")
+                print "Printing list of voxels for track {0} ...".format(trk_num)
+                fm = open("{0}/voxels_trk_{1}.dat".format(self.plt_base,trk_num),"w")
+                #fm.write("# (ID) (x) (y) (z) (E) (inMainPath)\n")
+                for hhit in trk_hits:
+                    inMainPath = 0;
+                    for imain in hMainPath:
+                        if(hhit.GetID() == imain): inMainPath = 1;
+                    fm.write("{0} {1} {2} {3} {4} {5}\n".format(hhit.GetID(),hhit.GetPosition().x(),hhit.GetPosition().y(),hhit.GetPosition().z(),hhit.GetAmplitude(),inMainPath))
+                fm.close()
+
+                # Print only the reconstructed track to a file.
+                print "Printing list of ordered main track voxels for track {0} ...".format(trk_num)
+                fm = open("{0}/voxels_reconstructed_trk_{1}.dat".format(self.plt_base,trk_num),"w")
+                #fm.write("# (ID) (x) (y) (z) (E)\n")
+                for imain in hMainPath:
+                    fm.write("{0} {1} {2} {3} {4}\n".format(trk_hits[imain].GetID(),trk_hits[imain].GetPosition().x(),trk_hits[imain].GetPosition().y(),trk_hits[imain].GetPosition().z(),trk_hits[imain].GetAmplitude()))
+                fm.close()
+
+            # ------------------------------------------------------------------------
+            # Determine the ordered track according to the specified method.
+            # Paolina-based ordering
+            if(self.trk_omethod == 0):
+
+                # Get the order of the hits determined by Paolina.
+                hOrder = main_trk.fetch_ivstore("MainPathHits")
+                #for iord in hOrder: print "{0}, ".format(iord);
+
+                # Fill the final track on which the calculation is to be performed.
+                for ihit in hOrder:
+                    ftrack.append(trk_hits[ihit])
+                    
+                # Set the extreme hits.
+                e1, e2 = main_trk.GetExtremes()
+
+            # Momentum-path-based ordering
+            elif(self.trk_omethod == 1):
+                print "Using momentum-based ordering"
+                iftrack = self.trk_order_pdirection(trk_hits,e1.GetID(),e2.GetID())
+                for ihit in iftrack:
+                    ftrack.append(trk_hits[ihit])
+                    
+                # Set the extreme hits.
+                e1 = ftrack[0]; e2 = ftrack[-1];
+
+            # MST-based ordering
+            elif(self.trk_omethod == 2):
+
+                # Get the order of the hits determined by Paolina.
+                hOrder = main_trk.fetch_ivstore("MSTHits")
+                #for iord in hOrder: print "{0}, ".format(iord);
+
+                # Fill the final track on which the calculation is to be performed.
+                for ihit in hOrder:
+                    ftrack.append(trk_hits[ihit])
+                
+                # Set the extreme hits.
+                e1 = ftrack[0]; e2 = ftrack[-1];
+
+            # Set the extremes coordinates.
             e1x = e1.GetPosition().x(); e1y = e1.GetPosition().y(); e1z = e1.GetPosition().z()
             e2x = e2.GetPosition().x(); e2y = e2.GetPosition().y(); e2z = e2.GetPosition().z()
-
+            
             # Fill the coordinate arrays with the main track hits.
             nhit = 0
             trk_hitID = []
@@ -643,18 +788,43 @@ class Curv(AAlgo):
                 trk_nM_0.append(nhit)
                 nhit = nhit + 1
 
+            # -----------------------------------------------------------------
             # Determine two blob energies.
+
+            # Paolina-based ordering
             eblob1 = 0.; eblob2 = 0.
-            for hhit in hList:
+            if(self.trk_omethod == 0):
+                
+                # Get the computed distances.
+                distExtFirst = main_trk.fetch_dvstore("DistExtFirst")
+                distExtSecond = main_trk.fetch_dvstore("DistExtSecond")
+                
+                for hhit in trk_hits:
+    
+                    d1 = distExtFirst[hhit.GetID()]  # sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
+                    d2 = distExtSecond[hhit.GetID()] # sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
+                    eh = hhit.GetAmplitude()
+    
+                    if(d1 < self.blob_radius):
+                        eblob1 += eh
+                    if(d2 < self.blob_radius):
+                        eblob2 += eh
+                        
+            # Other orderings
+            else:
+                
+                for hhit in trk_hits:
 
-                d1 = distExtFirst[hhit.GetID()]  # sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
-                d2 = distExtSecond[hhit.GetID()] # sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
-                eh = hhit.GetAmplitude()
+                    xh = hhit.GetPosition().x(); yh = hhit.GetPosition().y(); zh = hhit.GetPosition().z()
+                    eh = hhit.GetAmplitude()
 
-                if(d1 < self.blob_radius):
-                    eblob1 += eh
-                if(d2 < self.blob_radius):
-                    eblob2 += eh
+                    d1 = sqrt((xh-e1x)**2 + (yh-e1y)**2 + (zh-e1z)**2)
+                    d2 = sqrt((xh-e2x)**2 + (yh-e2y)**2 + (zh-e2z)**2)
+           
+                    if(d1 < self.blob_radius):
+                        eblob1 += eh
+                    if(d2 < self.blob_radius):
+                        eblob2 += eh                
 
             # Ensure the extremes are the ends of ftrack
             print "Extreme 1 ID = {0}, beginning of ftrack ID = {1}".format(e1.GetID(),ftrack[0].GetID())
@@ -757,8 +927,15 @@ class Curv(AAlgo):
                 if(d2 < self.blob_radius):
                     eblob2 += eh
 
-        # Record the number of hits used in this analysis.
+        # Decide whether we can continue based on the number of hits.
+        if(len(trk_xM_0) < 10): return False
+
+        # Record the event number.
+        self.l_evtnum.append(trk_num)
+
+        # Record the number of hits and voxels used in this analysis.
         self.l_nhits.append(len(trk_xM_0))
+        self.l_nvoxels.append(len(self.event.GetHits()))
 
         #if(eblob1 > eblob2):
         self.l_eblob1.append(eblob1)
@@ -837,7 +1014,7 @@ class Curv(AAlgo):
         else:
             fcbar = abs(self.wcyc)/(2*pi*fsamp)
         #rcyc = sqrt((KEinit+0.511)**2-0.511**2)/(KEinit+0.511)*sqrt(ux0**2 + uy0**2)*pc_clight*100/abs(wcyc);
-        self.m.log("Sampling frequency = {0} samp/s, cyclotron freq = {1} cyc/s, fcbar = {2}, should see {3} cycles".format(fsamp,self.wcyc/(2*pi),fcbar,abs(self.Ttrack*self.wcyc/(2*pi))))
+        print "Sampling frequency = {0} samp/s, cyclotron freq = {1} cyc/s, fcbar = {2}, should see {3} cycles".format(fsamp,self.wcyc/(2*pi),fcbar,abs(self.Ttrack*self.wcyc/(2*pi)))
         
         # -------------------------------------------------------------------------
         # FIR filter from: http://wiki.scipy.org/Cookbook/FIRFilter
@@ -848,7 +1025,7 @@ class Curv(AAlgo):
         width = 0.2
     
         # The desired attenuation in the stop band, in dB.
-        ripple_db = 40.0
+        ripple_db = 20.0
 
         # Compute the order and Kaiser parameter for the FIR filter.
         N, beta = signal.kaiserord(ripple_db, width)
@@ -865,6 +1042,7 @@ class Curv(AAlgo):
 
         # Compute the filter delay.
         fdelay = int(N/2)
+        print "Filter delay is {0}".format(fdelay);
         # -------------------------------------------------------------------------
     
         # Apply the filters.
@@ -971,15 +1149,31 @@ class Curv(AAlgo):
         # Calculate the mean curvature.
         halflen = len(sscurv) / 2
         if(len(sscurv) % 2 == 0):
-            m1 = 1.0*np.mean(sscurv[0:halflen])/halflen
-            m2 = 1.0*np.mean(sscurv[halflen:])/halflen
-            scurv_mean = m1 - m2
+            m1 = 1.0*np.sum(sscurv[0:halflen])/halflen
+            m2 = 1.0*np.sum(sscurv[halflen:])/halflen
         else:
-            m1 = 1.0*np.mean(sscurv[0:halflen])/halflen
-            m2 = 1.0*np.mean(sscurv[halflen:])/(halflen+1)
-            scurv_mean = m1 - m2
+            m1 = 1.0*np.sum(sscurv[0:halflen])/halflen
+            m2 = 1.0*np.sum(sscurv[halflen:])/(halflen+1)
+
+        # Flip the track if the average sign in the second half is negative,
+        #  and if sign-flipping is enabled.
+        sflip = 0
+        if(self.sign_ordering and m2 < 0.2):
+
+            # Reverse the track.
+            sscurv.reverse()
+            for iscurv in range(len(sscurv)): sscurv[iscurv] *= -1;
+            trk_xM_0.reverse()
+            trk_yM_0.reverse()
+            trk_zM_0.reverse()
+            trk_eM_0.reverse()
+
+            print "(Track {0}) Flipping track due to sign in second half of track being less than 0.2.".format(trk_num)
+            sflip = 1
+        self.l_sflip.append(sflip)        
 
         #print "Curvature asymmetry factor is {0}".format(scurv_mean);
+        scurv_mean = m1 - m2;
         self.l_scurv_mean.append(scurv_mean)
     
         # Compute FFTs
@@ -1197,12 +1391,12 @@ class Curv(AAlgo):
             plt.savefig("{0}/plt_trk_flt_{1}_{2}.pdf".format(self.plt_base,self.trk_name,trk_num), bbox_inches='tight');
             plt.close();
 
-            # Plot the unfiltered 3D plot alone.
+            # Plot the unfiltered 3D plot
             fig = plt.figure(5);
-            fig.set_figheight(5.0);
-            fig.set_figwidth(7.5);
+            fig.set_figheight(10.0);
+            fig.set_figwidth(15.0);
 
-            ax8 = fig.add_subplot(111, projection='3d');
+            ax8 = fig.add_subplot(221, projection='3d');
             #ax1.plot(trk_xM_0,trk_yM_0,trk_zM_0,'-',color='0.9');
             trk_nM_arr = np.array(trk_nM_0)
             trk_eM_arr = np.array(trk_eM_0)
@@ -1227,10 +1421,30 @@ class Curv(AAlgo):
             for lb in (lb_x + lb_y + lb_z):
                 lb.set_fontsize(8);
 
-            plt.title("Unfiltered: $\chi^2_B/\chi^2_S = $ {0}".format(chi2B/chi2S));
+            #plt.title("Unfiltered: $\chi^2_B/\chi^2_S = $ {0}".format(chi2B/chi2S));
             cb8 = plt.colorbar(s8);
-            #cb8.set_label('Hit energy (keV)');
             cb8.set_label('Hit number');
+
+            # Create the x-y projection.
+            ax9 = fig.add_subplot(222);
+            ax9.plot(trk_xM_0,trk_yM_0,'.',color='black');
+            ax9.plot(trk_xM_0,trk_yM_0,'-',color='black');
+            ax9.set_xlabel("x (mm)");
+            ax9.set_ylabel("y (mm)");
+
+            ax10 = fig.add_subplot(223);
+            ax10.plot(trk_xM_0,trk_zM_0,'.',color='black');
+            ax10.plot(trk_xM_0,trk_zM_0,'-',color='black');
+            ax10.set_xlabel("x (mm)");
+            ax10.set_ylabel("z (mm)");
+
+            ax11 = fig.add_subplot(224);
+            ax11.plot(trk_yM_0,trk_zM_0,'.',color='black');
+            ax11.plot(trk_yM_0,trk_zM_0,'-',color='black');
+            ax11.set_xlabel("y (mm)");
+            ax11.set_ylabel("z (mm)");
+
+            plt.show();
             plt.savefig("{0}/plt_trk_unflt_{1}_{2}.pdf".format(self.plt_base,self.trk_name,trk_num), bbox_inches='tight');
             plt.close();
      
@@ -1295,9 +1509,9 @@ class Curv(AAlgo):
 
             print "Writing file with {0} entries...".format(len(self.l_scurv_mean))
             fm = open("{0}/scurv_means.dat".format(self.plt_base),"w")
-            fm.write("# (trk) (asymm) (chi2s) (chi2b) (nhits) (Eblob1) (Eblob2) (blob flipped) (extreme_id)\n")
-            for evtnum,scurv,chi2s,chi2b,nhits,eblob1,eblob2,bflip,corrext,dt1c1,dt2c2,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t in zip(self.l_evtnum,self.l_scurv_mean,self.l_chi2S,self.l_chi2B,self.l_nhits,self.l_eblob1,self.l_eblob2,self.l_bflip,self.l_correct_extremes,self.l_dt1c1,self.l_dt2c2,self.l_e1x,self.l_e1y,self.l_e1z,self.l_e1x_t,self.l_e1y_t,self.l_e1z_t,self.l_e2x,self.l_e2y,self.l_e2z,self.l_e2x_t,self.l_e2y_t,self.l_e2z_t):
-                fm.write("{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14} {15} {16} {17} {18} {19} {20} {21} {22}\n".format(evtnum,scurv,chi2s,chi2b,nhits,eblob1,eblob2,bflip,corrext,dt1c1,dt2c2,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t))
+            fm.write("# (trk) (asymm) (chi2s) (chi2b) (nhits) (nvoxels) (Eblob1) (Eblob2) (blob flipped) (extreme_id) (ext1 x) (ext1 y) (ext1 z) (true ext1 x) (true ext1 y) (true ext1 z) (ext2 x) (ext2 y) (ext2 z) (true ext2 x) (true ext2 y) (true ext2 z) (sign flipped)\n")
+            for evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip in zip(self.l_evtnum,self.l_scurv_mean,self.l_chi2S,self.l_chi2B,self.l_nhits,self.l_nvoxels,self.l_eblob1,self.l_eblob2,self.l_bflip,self.l_correct_extremes,self.l_e1x,self.l_e1y,self.l_e1z,self.l_e1x_t,self.l_e1y_t,self.l_e1z_t,self.l_e2x,self.l_e2y,self.l_e2z,self.l_e2x_t,self.l_e2y_t,self.l_e2z_t,self.l_sflip):
+                fm.write("{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14} {15} {16} {17} {18} {19} {20} {21} {22}\n".format(evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip))
             fm.close()
 
         # Generate the profiles.
@@ -1370,3 +1584,199 @@ class Curv(AAlgo):
         self.m.log(1,'+++End method of algo_example algorithm+++')
 
         return
+
+    def trk_order_pdirection(self,hits,ext1,ext2):
+
+        # Create the track arrays from the hits.
+        vtrk_ID = []; vtrk_x = []; vtrk_y = []; vtrk_z = []; vtrk_E = [];
+        for hh in hits:
+            vtrk_ID.append(hh.GetID());
+            vtrk_x.append(hh.GetPosition().x());
+            vtrk_y.append(hh.GetPosition().y());
+            vtrk_z.append(hh.GetPosition().z());
+            vtrk_E.append(hh.GetAmplitude());
+      
+        voxelsize = 2.0;
+        # ---------------------------------------------------------------------------
+        # Create the adjacency matrix
+        # ---------------------------------------------------------------------------
+        
+        # Iterate through all voxels, and for each one find the neighboring voxels.
+        adjMat = []
+        for vID1,vx1,vy1,vz1,vE1 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
+        
+            nbr_list = [];
+            for vID2,vx2,vy2,vz2,vE2 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
+                
+                if(vx1 == vx2 and vy1 == vy2 and vz1 == vz2):
+                    nbr_list.append(-1);
+                elif ((vx1 == vx2+voxelsize or vx1 == vx2-voxelsize or vx1 == vx2) and (vy1 == vy2+voxelsize or vy1 == vy2-voxelsize or vy1 == vy2) and (vz1 == vz2+voxelsize or vz1 == vz2-voxelsize or vz1 == vz2)):
+                    nbr_list.append(sqrt((vx2-vx1)**2 + (vy2-vy1)**2 + (vz2-vz1)**2));
+                else:
+                    nbr_list.append(0);
+                    
+            
+            adjMat.append(nbr_list);
+        
+        if(debug > 2):
+            print "Adjacency matrix:";
+            print adjMat;
+        
+        # ---------------------------------------------------------------------------
+        # Construct the graph for the track
+        # ---------------------------------------------------------------------------
+        trk = nx.Graph();
+        trk.add_nodes_from(vtrk_ID);
+        
+        # Add edges connecting each node to its neighbor nodes based on the values
+        #  in the adjacency matrix.
+        n1 = 0;
+        for nnum in range(len(vtrk_ID)):
+            
+            n2 = 0;
+            for nbnum in range(len(vtrk_ID)):
+                ndist = adjMat[n1][n2];
+                if(ndist > 0):
+        #            print "Adding edge from {0} to {1}".format(n1,n2)
+                    trk.add_edge(n1,n2,weight=ndist);
+                n2 += 1;
+                    
+            n1 += 1;
+        
+        if(debug > 2):
+            #nx.draw_random(trk);
+            #plt.show();
+            print trk.nodes()
+            print trk.edges()
+        
+        vinit = ext1
+        vfinal = ext2
+       
+        ## ---------------------------------------------------------------------------
+        ## Step through the track, favoring directions along the way of the present momentum
+        ## ---------------------------------------------------------------------------
+        ftrack = [];
+        
+        # Create a matrix of booleans for the visited voxels.
+        visitedMat = [];
+        for n1 in range(len(hits)):
+            visitedMat.append(False);
+        
+        # -----------------------------------------------------------------------------
+        # Traverse the graph according to the following rules:
+        # 1. proceed to the next neighbor in which the direction is closest to
+        #   the present momentum direction (initial momentum direction in random)
+        # 2. only proceed to the next neighbor if it is unvisited, or jump a single
+        #    neighbor to one of its unvisited neighbors
+        # 3. end when the 2nd extreme has been reached, or no longer possible to
+        #    proceed to the next node
+        done = False;
+        curr_vox = vinit;
+        curr_p = np.array([0,0,0]);
+        ftrack.append(curr_vox);
+        visitedMat[curr_vox] = True;
+        
+        # Get one of the neighbors of the first vector at random.
+        nbrs_init = [];
+        inbr = 0;
+        for nval in adjMat[vinit]:
+            if(nval > 0): nbrs_init.append(inbr);
+            inbr += 1;
+        if(len(nbrs_init) > 0):
+            rnbr = nbrs_init[np.random.randint(len(nbrs_init))];
+            curr_p = self.dir_vec(vtrk_x[vinit],vtrk_y[vinit],vtrk_z[vinit],vtrk_x[rnbr],vtrk_y[rnbr],vtrk_z[rnbr]);
+            curr_vox = rnbr;
+            ftrack.append(curr_vox);
+            visitedMat[curr_vox] = True;
+            if(debug > 1):
+                print "Initial step to voxel {0} ({1},{2},{3}) from voxel {4} ({5},{6},{7}) with direction ({8},{9},{10})".format(curr_vox,vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vinit,vtrk_x[vinit],vtrk_y[vinit],vtrk_z[vinit],curr_p[0],curr_p[1],curr_p[2]);
+        else:
+            print "No neighbors found for initial voxel.";
+            done = True;
+            
+        # Set up the momentum queue to average the specified number of past momenta.
+        pq = deque(maxlen=5);
+        pq.appendleft(curr_p);
+        
+        # Continue searching through all other voxels.
+        while(not done):
+                
+                # Ensure we have not reached the final voxel.
+            #    if(curr_vox == vfinal):
+            #        if(debug > 1): print "[Voxel {0}]: END (final voxel reached)".format(curr_vox);
+            #        done = True;
+            #        break;
+            
+            # Get the neighbor vector for this voxel.
+            nmat = adjMat[curr_vox];
+            
+            # Get all visitable neighbors with priority 1 and 2.
+            #  Note: priority 1 is preferred over priority 2
+            nids1 = []; nids2 = [];
+            inbr = 0;
+            for nval in nmat:
+                
+                # Neighbor found if nonzero value in adjacency matrix.
+                if(nval > 0):
+                    # Neighbor is priority 1 if not visited.
+                    if(not visitedMat[inbr]):
+                        nids1.append(inbr);
+                    # Neighbor is priority 2 if visited but contains unvisited neighbors.
+                    else:
+                        pri2 = False;
+                        nmat2 = adjMat[inbr];
+                        inbr2 = 0;
+                        for nval2 in nmat2:                    
+                            # Make this neighbor priority 2 if it has at least 1 non-visited neighbor.
+                            if(nval2 > 0 and not visitedMat[inbr2]): 
+                                pri2 = True;
+                                break;
+                            inbr2 += 1;
+                        if(pri2): nids2.append(inbr);
+                inbr += 1;
+                
+            max_dot = -2.; nmax_dot = -1; next_vox = -1;
+            if(len(nids1) > 0):
+                for nbr1 in nids1:
+                    dvec = self.dir_vec(vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vtrk_x[nbr1],vtrk_y[nbr1],vtrk_z[nbr1]);
+                    dprod = curr_p[0]*dvec[0] + curr_p[1]*dvec[1] + curr_p[2]*dvec[2];
+                    if(dprod > max_dot):
+                        max_dot = dprod; nmax_dot = nbr1;
+                next_vox = nbr1;
+            elif(len(nids2) > 0):
+                for nbr2 in nids2:
+                    dvec = self.dir_vec(vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vtrk_x[nbr2],vtrk_y[nbr2],vtrk_z[nbr2]);
+                    dprod = curr_p[0]*dvec[0] + curr_p[1]*dvec[1] + curr_p[2]*dvec[2];
+                    if(dprod > max_dot):
+                        max_dot = dprod; nmax_dot = nbr2;
+                next_vox = nbr2;
+            else:
+                if(debug > 1): print "[Voxel {0}]: END (no neighbors)".format(curr_vox);
+                done = True;
+                break;
+            
+            # Set the next voxel as the current voxel, and add it to the track.
+            if(debug > 1): print "-- [Voxel {0}, p = ({1},{2},{3})] Adding next voxel {4} to track".format(curr_vox,curr_p[0],curr_p[1],curr_p[2],next_vox);
+            new_p = self.dir_vec(vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vtrk_x[next_vox],vtrk_y[next_vox],vtrk_z[next_vox]);
+            nptemp = 1;
+            for old_p in pq:
+                new_p += old_p;
+                nptemp += 1;
+            new_p /= nptemp;
+            print "Averaged {0} momenta values".format(nptemp);
+            
+            # Set and record the current momentum.
+            curr_p = new_p;
+            pq.appendleft(new_p);
+            curr_vox = next_vox;
+            ftrack.append(curr_vox);
+            visitedMat[curr_vox] = True;
+
+        return ftrack;
+
+    # Calculates and returns the direction vector from point 1 to point 2.
+    def dir_vec(self,x1,y1,z1,x2,y2,z2):
+        vd = np.array([(x2-x1),(y2-y1),(z2-z1)]);
+        vlen = sqrt(vd[0]**2 + vd[1]**2 + vd[2]**2);
+        vd = vd/vlen;
+        return vd;
