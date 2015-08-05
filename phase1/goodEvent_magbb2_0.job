@@ -1,0 +1,79 @@
+
+############################ INPUT DATA ################################
+#--------- INPUT DATA FORMAT -------#
+CNTJob READER S gateReader
+
+#--------- INPUT DATA FILES -------#
+CNTJob INPUT_DATA SV 8
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_0.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_1.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_2.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_3.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_4.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_5.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_6.voxels2.energy07.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/nmag2/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0_7.voxels2.energy07.gate.root
+
+
+############################ OUTPUT DATA ################################
+#------ SAVE EVENTS IN OUTPUT FILE ----------# 
+CNTJob SAVE I 1
+
+#--------- DATA WRITER -------#
+CNTJob WRITER S gateWriter
+
+#--------- OUTPUT DATA -------#
+CNTJob OUTPUT_DATA SV 1
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.voxels2.energy07.p1.gate.root
+
+
+############################ EVENTS TO ANALYZE ##########################
+#---------- NUMBER OF EVENTS TO ANALYZE ----------#
+CNTJob NEVENTS I 10000
+
+#---------- FIRST EVENS TO ANALYZE ----------#
+CNTJob FEVENT I 0
+
+
+
+############################ VERBOSITY LEVEL ##########################
+#---------- VERBOSITY LEVEL ----------#
+CNTJob LEVEL I 1
+
+
+
+############################ AUXILIARY FILES ##############################
+#------------- LOG FILE -------------#
+CNTJob LOG I 1
+CNTJob FLOG S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.voxels2.energy07.p1.log
+
+#---------- HISTOGRAMS FILE ----------#
+CNTJob HISTOS I 1
+CNTJob FHISTOS S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.Xe136_bb0nu.0.voxels2.energy07.p1.histos.root
+
+######################### ALGORITHMS ################################
+#--------- PATHS with modules to be used -------#
+CNTJob PATHS SV 2
+/home/jmunoz/dev/Next100_2K15/tracks/algos/
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/algos
+
+#--------- C++ Libraries -------#
+CNTJob LIBS SV 1
+/home/jmunoz/dev/Next100_2K15/tracks/goodRoadFilter/lib/libgoodRoadFilter.so
+
+#--------- ALGORITHMS-------#
+CNTJob ALGOS SV 2
+goodRoadFilter
+MultiBlobFilter
+
+#---------- Algorithm parameters ----------#
+goodRoadFilter TYPE S goodRoadFilter
+goodRoadFilter LAN  S c++
+goodRoadFilter LEVEL I 1
+goodRoadFilter maxNumTracks I 1
+goodRoadFilter minEnergy D 2.435
+goodRoadFilter maxEnergy D 2.485
+
+MultiBlobFilter useTruth I 0
+MultiBlobFilter blobRadius D 20.0
+MultiBlobFilter blobMinE D 0.3
