@@ -1,0 +1,70 @@
+############################ INPUT DATA ################################
+#--------- INPUT DATA FORMAT -------#
+CNTJob READER S gateReader
+
+#--------- INPUT DATA FILES -------#
+CNTJob INPUT_DATA SV 1
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/true/MagBox_Xe_10atm_05tesla.e2447.0.gate.root
+
+
+############################ OUTPUT DATA ################################
+#------ SAVE EVENTS IN OUTPUT FILE ----------# 
+CNTJob SAVE I 1
+
+#--------- DATA WRITER -------#
+CNTJob WRITER S gateWriter
+
+#--------- OUTPUT DATA -------#
+CNTJob OUTPUT_DATA SV 1
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.gate.root
+
+
+############################ EVENTS TO ANALYZE ##########################
+#---------- NUMBER OF EVENTS TO ANALYZE ----------#
+CNTJob NEVENTS I 100000
+
+#---------- FIRST EVENS TO ANALYZE ----------#
+CNTJob FEVENT I 0
+
+
+############################ VERBOSITY LEVEL ##########################
+#---------- VERBOSITY LEVEL ----------#
+CNTJob LEVEL I 1
+
+
+############################ AUXILIARY FILES ##############################
+#------------- LOG FILE -------------#
+CNTJob LOG I 1
+CNTJob FLOG S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.log
+
+#---------- HISTOGRAMS FILE ----------#
+CNTJob HISTOS I 1
+CNTJob FHISTOS S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/rec/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.histos.root
+
+
+############################ ALGORITHMS ################################
+#--------- PATHS with modules to be used -------#
+CNTJob PATHS SV 1
+/home/jmunoz/dev/HPXe/smearing/algos/
+
+#--------- C++ Libraries -------#
+CNTJob LIBS SV 2
+/data4/NEXT/sw/paolina/lib/libpaolina.so
+/home/jmunoz/dev/Next100_2K15/voxels/voxelizer/lib/libvoxelizer.so
+
+#--------- ALGORITHMS-------#
+CNTJob ALGOS SV 2
+voxelizer
+EnergySmearing
+
+#---------- Algorithm parameters ----------#
+voxelizer TYPE S voxelizer
+voxelizer LAN  S c++
+voxelizer LEVEL I 1
+voxelizer voxelSizeX D 2
+voxelizer voxelSizeY D 2
+voxelizer voxelSizeZ D 2
+voxelizer minEnergy  D 0.01
+
+EnergySmearing LEVEL I 1
+EnergySmearing FWHMqbb D 0.7
