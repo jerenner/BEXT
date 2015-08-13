@@ -31,8 +31,6 @@ gSystem.Load("$GATE_DIR/lib/libGATEIO")
 gSystem.Load("$GATE_DIR/lib/libGATEUtils")
 from ROOT import gate
 
-debug = 2;
-
 # TrackNode class
 #  Node types:
 #   0: normal
@@ -374,7 +372,7 @@ class Curv(AAlgo):
             os.mkdir(self.trk_base)
         if(not os.path.isdir(self.plt_base)):
             os.mkdir(self.plt_base)
-            print "Creating plot directory {0}...".format(self.plt_base)
+            self.m.log(1, "Creating plot directory {0}...".format(self.plt_base))
 
         # Define the phyiscal constants.
         self.pc_rho0 = 2.6867774e19   # density of ideal gas at T=0C, P=1 atm in cm^(-3)
@@ -384,7 +382,7 @@ class Curv(AAlgo):
         self.pc_eC = e_SI             # electron charge in C
         self.pc_me = 9.10938215e-31   # electron mass in kg
         self.pc_clight = 2.99792458e8 # speed of light in m/s
-        print "Speed of light is {0} m/s".format(c_light)
+        self.m.log(1, "Speed of light is {0} m/s".format(c_light))
 
         # Misc. options
         self.grdcol = 0.98
@@ -566,10 +564,10 @@ class Curv(AAlgo):
         trk_num = self.event.GetEventID()
 
         # Get all tracks from the voxelization step. 
-        all_trks = self.event.GetTracks()
+        all_trks = self.event.GetTracks(gate.SIPM)
         if(len(all_trks) != 1):
             self.m.log("ERROR: Event has more than 1 track.")
-            exit(0)
+            return False
 
         # Construct the Monte Carlo truth track if it will be needed later.
         if(self.verify_extremes or self.use_voxels == 0):
@@ -577,17 +575,18 @@ class Curv(AAlgo):
             # Get the list of all MC hits.
             #hList = self.event.GetMCHits()
 
-            # Get the MC tracks.
+            # Get the MC tracks and smeared MC tracks.
             mcTracks = self.event.GetMCTracks()
+            smcTracks = self.event.GetTracks(gate.NOSTYPE)
 
-            # Find the energy of the most energetic and second-most energetic tracks.
+            # Find the energy of the most energetic and second-most energetic tracks (use MC true hits for this).
             ifirst = -1; isecond = -1
             efirst = -1.; esecond = -1.
             nmctrk = 0
 
             for mctrk in mcTracks:
                 trk_en = mctrk.GetHitsEnergy();
-                print "-- MC track with energy {0}".format(trk_en)
+                print "-- MC track with {0} hits and energy {1}; smeared track with {2} hits and energy {3}".format(len(mctrk.GetHits()),trk_en,len(smcTracks[nmctrk]),smcTracks[nmctrk].GetHitsEnergy())
                 if(mctrk.GetParticle().IsPrimary()):
                     if(trk_en > efirst):
                         isecond = ifirst; esecond = efirst
@@ -602,62 +601,27 @@ class Curv(AAlgo):
 
             #print "Found most energetic index {0}, E1 = {1}; second-most energetic index {2}, E2 = {3}".format(ifirst,efirst,isecond,esecond)
 
-            ftrk = mcTracks[ifirst]
+            # Use the hits from the first smeared MC track.
+            #ftrk = mcTracks[ifirst]    # This statement uses the MC true hits
+            ftrk = smcTracks[ifirst]
             ft_hits = ftrk.GetHits()
 
             # Add the least energetic electron track first (in reverse), if there is one.
             mainHits = []
             #if(nmctrk > 1):
             if(event.GetMCEventType() == gate.BB0NU):
-                strk = mcTracks[isecond]
+                strk = smcTracks[isecond]  # Use the smeared hits
                 st_hits = strk.GetHits()
                 for ihit in range(len(st_hits)):
                     mainHits.append(st_hits[len(st_hits)-1-ihit])
             #else:
             #    print "(Track {0}): WARNING - only one energetic electron track".format(trk_num)
 
-            # Add the most energetic electron track.
+            # Add the most energetic electron track (smeared hits).
             for ihit in range(len(ft_hits)):
                 mainHits.append(ft_hits[ihit])
 
-            # Determine the longest connected track.
-            #ctracks = []; ctrack_t = []
-            #ihit = 0; itrk = 0
-            #ctrack_t.append(mainHits[0])
-            #while(ihit < len(mainHits)-1):
-            #     h1 = mainHits[ihit]
-            #     h2 = mainHits[ihit+1]
-            #
-            #     # Get the distance between the consecutive hits.
-            #     x1 = h1.GetPosition().x(); y1 = h1.GetPosition().y(); z1 = h1.GetPosition().z()
-            #     x2 = h2.GetPosition().x(); y2 = h2.GetPosition().y(); z2 = h2.GetPosition().z()
-            #     hdist = sqrt((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2)
-            #     #print "--- Distance between consecutive hits is {0} mm".format(hdist)
-            #
-            #     # Add the next hit to the current connected track if it is connected.
-            #     if(hdist < self.ctrack_dist):
-            #         ctrack_t.append(h2);
-            #     # Otherwise, start a new connected track.
-            #     else:
-            #         ctracks.append(ctrack_t)
-            #         ctrack_t = []
-            #         ctrack_t.append(h2)
-            #
-            #     ihit += 1
-            #
-            # Add the final connected track to the list.
-            #ctracks.append(ctrack_t)
-            #
-            # Get the list of hits containing the longest connected track.
-            #ilct = -1; llct = -1
-            #itrk = 0
-            #for ctrk in ctracks:
-            #    ltrk = len(ctrk)
-            #    if(ltrk > llct):
-            #        ilct = itrk
-            #        llct = ltrk
-            #    itrk += 1
-            ##ftrack = mcTracks[ifirst].GetHits()
+            # Save this track.
             ftrack = mainHits
 
             if(self.print_track):
@@ -692,10 +656,10 @@ class Curv(AAlgo):
             ftrack = []
 
             # Get all tracks from the voxelization step.
-            all_trks = self.event.GetTracks()
+            all_trks = self.event.GetTracks(gate.SIPM)
             if(len(all_trks) != 1):
                 self.m.log("ERROR: Event has more than 1 track.")
-                exit(0)
+                return False
 
             # Get the single track for this event.
             main_trk = all_trks[0]
@@ -833,79 +797,39 @@ class Curv(AAlgo):
         # Otherwise construct the track using the MC truth hits.
         else:
 
-            #for ctrk in ctracks:
-            #    print "-> Track with {0} hits".format(len(ctrk))
+            # If we have an MST-based ordering, we want to use this track instead.
+            if(self.trk_omethod == 2):
+                
+                ftrack = []
+
+                # Get the order of the hits determined by Paolina (stored in the voxelized main track).
+                all_trks = self.event.GetTracks(gate.SIPM)
+                if(len(all_trks) != 1):
+                    self.m.log("ERROR: Event has more than 1 track.")
+                    return False
+
+                # Get the single track for this event.
+                main_trk = all_trks[0]
+                
+                # Get the ordering from the MST procedure.
+                hOrder = main_trk.fetch_ivstore("MSTHits")
+                #for iord in hOrder: print "{0}, ".format(iord);
+
+                # Fill the final track on which the calculation is to be performed
+                #  (use smeared MC hits).
+                smc_hits = self.event.GetHits(gate.NOSTYPE)
+                for ihit in hOrder:
+                    ftrack.append(smc_hits[ihit])
 
             # Fill the coordinate arrays with the main track hits.
-            trk_xM_true = []; trk_yM_true = []; trk_zM_true = []
-            trk_nM_true = []; trk_eM_true = []
             nhit = 0
             for fhit in ftrack:
-                trk_xM_true.append(fhit.GetPosition().x())
-                trk_yM_true.append(fhit.GetPosition().y())
-                trk_zM_true.append(fhit.GetPosition().z())
-                trk_eM_true.append(fhit.GetAmplitude())
-                trk_nM_true.append(nhit)
+                trk_xM_0.append(fhit.GetPosition().x())
+                trk_yM_0.append(fhit.GetPosition().y())
+                trk_zM_0.append(fhit.GetPosition().z())
+                trk_eM_0.append(fhit.GetAmplitude())
+                trk_nM_0.append(nhit)
                 nhit = nhit + 1
-
-            # Apply sparsing if specified.
-            trk_xM_sp = []; trk_yM_sp = []; trk_zM_sp = []
-            trk_nM_sp = []; trk_eM_sp = []
-            if(self.sparse_width > 1):
-
-                ihit = 0; nhit = 0
-                while(ihit < len(trk_xM_true)):
-
-                    sp = ihit
-
-                    # Create an effective (sparsed) hit.
-                    xeff = 0.; yeff = 0.; zeff = 0.; eeff = 0.
-                    while(sp < len(trk_xM_true) and sp < (ihit + self.sparse_width)):
-                        ehit = trk_eM_true[sp]
-                        xeff += trk_xM_true[sp]*ehit
-                        yeff += trk_yM_true[sp]*ehit
-                        zeff += trk_zM_true[sp]*ehit
-                        eeff += ehit
-                        sp += 1
-                    ihit += self.sparse_width
-
-                    # Finish calculating effective coordinates.
-                    xeff /= eeff
-                    yeff /= eeff
-                    zeff /= eeff
-
-                    # Record the values in lists for the sparsed track.
-                    trk_xM_sp.append(xeff)
-                    trk_yM_sp.append(yeff)
-                    trk_zM_sp.append(zeff)
-                    trk_eM_sp.append(eeff)
-                    trk_nM_sp.append(nhit)
-
-                    nhit += 1
-            else:
-                trk_xM_sp = trk_xM_true
-                trk_yM_sp = trk_yM_true
-                trk_zM_sp = trk_zM_true
-                trk_eM_sp = trk_eM_true
-                trk_nM_sp = trk_nM_true
-
-            # Apply smearing if specified.
-            if(self.xy_smearing > 0):
-
-                for xm,ym,zm,em,nm in zip(trk_xM_sp,trk_yM_sp,trk_zM_sp,trk_eM_sp,trk_nM_sp):
-                    xsm = rd.gauss(xm,self.xy_smearing)
-                    ysm = rd.gauss(ym,self.xy_smearing)
-                    trk_xM_0.append(xsm)
-                    trk_yM_0.append(ysm)
-                    trk_zM_0.append(zm)
-                    trk_eM_0.append(em)
-                    trk_nM_0.append(nm)
-            else:
-                trk_xM_0 = trk_xM_sp
-                trk_yM_0 = trk_yM_sp
-                trk_zM_0 = trk_zM_sp
-                trk_eM_0 = trk_eM_sp
-                trk_nM_0 = trk_nM_sp 
 
             # Set the extremes.
             e1x = trk_xM_0[0]; e1y = trk_yM_0[0]; e1z = trk_zM_0[0]
@@ -928,7 +852,7 @@ class Curv(AAlgo):
                     eblob2 += eh
 
         # Decide whether we can continue based on the number of hits.
-        if(len(trk_xM_0) < 10): return False
+        #if(len(trk_xM_0) < 10): return False
 
         # Record the event number.
         self.l_evtnum.append(trk_num)
@@ -1618,9 +1542,8 @@ class Curv(AAlgo):
             
             adjMat.append(nbr_list);
         
-        if(debug > 2):
-            print "Adjacency matrix:";
-            print adjMat;
+        self.m.log(2, "Adjacency matrix:");
+        self.m.log(2, adjMat);
         
         # ---------------------------------------------------------------------------
         # Construct the graph for the track
@@ -1643,11 +1566,10 @@ class Curv(AAlgo):
                     
             n1 += 1;
         
-        if(debug > 2):
-            #nx.draw_random(trk);
-            #plt.show();
-            print trk.nodes()
-            print trk.edges()
+        self.m.log(2, "Track nodes")
+        self.m.log(2, trk.nodes())
+        self.m.log(2, "Track edges")
+        self.m.log(2, trk.edges())
         
         vinit = ext1
         vfinal = ext2
@@ -1688,10 +1610,9 @@ class Curv(AAlgo):
             curr_vox = rnbr;
             ftrack.append(curr_vox);
             visitedMat[curr_vox] = True;
-            if(debug > 1):
-                print "Initial step to voxel {0} ({1},{2},{3}) from voxel {4} ({5},{6},{7}) with direction ({8},{9},{10})".format(curr_vox,vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vinit,vtrk_x[vinit],vtrk_y[vinit],vtrk_z[vinit],curr_p[0],curr_p[1],curr_p[2]);
+            self.m.log(1, "Initial step to voxel {0} ({1},{2},{3}) from voxel {4} ({5},{6},{7}) with direction ({8},{9},{10})".format(curr_vox,vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vinit,vtrk_x[vinit],vtrk_y[vinit],vtrk_z[vinit],curr_p[0],curr_p[1],curr_p[2]));
         else:
-            print "No neighbors found for initial voxel.";
+            self.m.log(1, "No neighbors found for initial voxel.");
             done = True;
             
         # Set up the momentum queue to average the specified number of past momenta.
@@ -1700,12 +1621,6 @@ class Curv(AAlgo):
         
         # Continue searching through all other voxels.
         while(not done):
-                
-                # Ensure we have not reached the final voxel.
-            #    if(curr_vox == vfinal):
-            #        if(debug > 1): print "[Voxel {0}]: END (final voxel reached)".format(curr_vox);
-            #        done = True;
-            #        break;
             
             # Get the neighbor vector for this voxel.
             nmat = adjMat[curr_vox];
@@ -1751,12 +1666,12 @@ class Curv(AAlgo):
                         max_dot = dprod; nmax_dot = nbr2;
                 next_vox = nbr2;
             else:
-                if(debug > 1): print "[Voxel {0}]: END (no neighbors)".format(curr_vox);
+                self.m.log(1, "[Voxel {0}]: END (no neighbors)".format(curr_vox));
                 done = True;
                 break;
             
             # Set the next voxel as the current voxel, and add it to the track.
-            if(debug > 1): print "-- [Voxel {0}, p = ({1},{2},{3})] Adding next voxel {4} to track".format(curr_vox,curr_p[0],curr_p[1],curr_p[2],next_vox);
+            self.m.log(1, "-- [Voxel {0}, p = ({1},{2},{3})] Adding next voxel {4} to track".format(curr_vox,curr_p[0],curr_p[1],curr_p[2],next_vox));
             new_p = self.dir_vec(vtrk_x[curr_vox],vtrk_y[curr_vox],vtrk_z[curr_vox],vtrk_x[next_vox],vtrk_y[next_vox],vtrk_z[next_vox]);
             nptemp = 1;
             for old_p in pq:

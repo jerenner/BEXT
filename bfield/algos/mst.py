@@ -1,13 +1,17 @@
 #
 # mst.py
 #
-# Determines track ordering.
+# Determines track ordering using MST-based algorithm.
 #
 
 import networkx as nx
 import os
 import numpy as np
 import random as rd
+import matplotlib.pyplot as plt
+import matplotlib.colors as mpcol
+import matplotlib.cm as cmx
+
 from math import *
 from Centella.AAlgo import AAlgo
 from Centella.physical_constants import *
@@ -92,6 +96,55 @@ class mst(AAlgo):
         except KeyError:
             self.m.log(1, "WARNING!! Parameter: 'path_overlap_tol' not defined.")
             exit(0)
+            
+        # Flag to use MC hits.
+        try:
+            self.par_use_voxels = self.ints['use_voxels']
+            self.use_voxels = False
+            if(self.par_use_voxels == 1):
+                self.use_voxels = True
+            self.m.log(1, "Use voxels = {0}".format(self.use_voxels))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'use_voxels' not defined.")
+            exit(0)
+            
+        # Maximum distance between neighboring MC hits
+        try:
+            self.nbr_dist = self.doubles['nbr_dist']
+            self.m.log(1, "Maximum distance between neighboring MC hits = {0}".format(self.nbr_dist))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'nbr_dist' not defined.")
+            exit(0)
+            
+        # Flag to plot tracks.
+        try:
+            self.par_plt_tracks = self.ints['plt_tracks']
+            self.plt_tracks = False
+            if(self.par_plt_tracks == 1):
+                self.plt_tracks = True
+            self.m.log(1, "Plot tracks = {0}".format(self.plt_tracks))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'plt_tracks' not defined.")
+            exit(0)
+        
+        # Plot base output directory.
+        try:
+            self.plt_base = self.strings['plt_base']
+            self.m.log(1, "Plot base dir = {0}".format(self.plt_base))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'plt_base' not defined.")
+            exit(0)
+            
+        # Plot output format.
+        try:
+            self.out_fmt = self.strings['out_fmt']
+            self.m.log(1, "Plot output format = {0}".format(self.out_fmt))
+        except KeyError:
+            self.m.log(1, "WARNING!! Parameter: 'out_fmt' not defined.")
+            exit(0)
+
+        # Misc. options
+        self.grdcol = 0.98
 
     def initialize(self):
 
@@ -115,26 +168,25 @@ class mst(AAlgo):
         # Get the event number.
         trk_num = self.event.GetEventID()
 
-        # Get all tracks from the voxelization step. 
-        all_trks = self.event.GetTracks()
+        # Get all tracks from the voxelization and mc steps. 
+        all_trks = self.event.GetTracks(gate.SIPM)
         if(len(all_trks) != 1):
             self.m.log("ERROR: Event has more than 1 track.")
             exit(0)
-
-        # Get all tracks from the voxelization step.
-        all_trks = self.event.GetTracks()
-        if(len(all_trks) != 1):
-            self.m.log("ERROR: Event has more than 1 track.")
-            exit(0)
-
-        # Get the list of hits.
-        hList = self.event.GetHits()
 
         # Get the initial track for this event.
         main_trk = all_trks[0]
 
+        # Get the correct list of hits voxels or MC smeared (NOSTYPE).
+        if(self.use_voxels):
+            hList = self.event.GetHits()
+            print "Performing MST with {0} voxels.".format(len(hList)); 
+        else: 
+            hList = self.event.GetHits(gate.NOSTYPE)
+            print "Performing MST with {0} smeared/sparsed MC hits.".format(len(hList));
+
         # Determine the ordered track according to the MST algorithm.
-        ftrack = self.trk_mst(hList)
+        (ftrack,fsegments) = self.trk_mst(hList)
 
         # Place the ordering of the hits in the MST track in the vstore of
         #  the tracks object.
@@ -142,6 +194,123 @@ class mst(AAlgo):
         for hh in ftrack:
             mst_ord.push_back(hh.GetID())
         main_trk.store("MSTHits",mst_ord)
+
+        if(self.plt_tracks):
+
+            # Create the paths lists for each segment.
+            spaths = [];
+            for nseg in fsegments: 
+                spaths.append(nseg.path);
+                if(debug > 1): print "{0} with {1} nodes.".format(nseg,len(nseg.path));
+            
+            # Fill arrays for the MST track.
+            msttrk_ID = []; msttrk_x = []; msttrk_y = []; msttrk_z = []; msttrk_E = [];
+            for hh in ftrack:
+                msttrk_ID.append(hh.GetID());
+                msttrk_x.append(hh.GetPosition().x());
+                msttrk_y.append(hh.GetPosition().y());
+                msttrk_z.append(hh.GetPosition().z());
+                msttrk_E.append(hh.GetAmplitude());
+            
+            # Fill the arrays for the MC track.
+            mctrk_ID = []; mctrk_x = []; mctrk_y = []; mctrk_z = []; mctrk_E = [];
+            for hh in hList:
+                mctrk_ID.append(hh.GetID());
+                mctrk_x.append(hh.GetPosition().x());
+                mctrk_y.append(hh.GetPosition().y());
+                mctrk_z.append(hh.GetPosition().z());
+                mctrk_E.append(hh.GetAmplitude());
+            
+            # ---------------------------------------------------------------------
+            # Plot MC vs. MST.
+            fig = plt.figure(1);
+            fig.set_figheight(10.0);
+            fig.set_figwidth(15.0);
+            
+            ax1 = fig.add_subplot(221, projection='3d');
+            mctrk_col = []; mid = 0;
+            for mid0 in mctrk_ID:
+                mctrk_col.append(mid);
+                mid += 1;
+            s1 = ax1.scatter(mctrk_x,mctrk_y,mctrk_z,marker='s',s=30,linewidth=0.2,c=mctrk_col,cmap=plt.get_cmap('rainbow'),vmin=min(mctrk_col),vmax=max(mctrk_col));
+            s1.set_edgecolors = s1.set_facecolors = lambda *args:None;  # this disables automatic setting of alpha relative of distance to camera
+            ax1.set_xlabel("x (mm)");
+            ax1.set_ylabel("y (mm)");
+            ax1.set_zlabel("z (mm)");
+            ax1.set_title("Monte Carlo Truth");
+    
+            lb_x = ax1.get_xticklabels();
+            lb_y = ax1.get_yticklabels();
+            lb_z = ax1.get_zticklabels();
+            for lb in (lb_x + lb_y + lb_z):
+                lb.set_fontsize(8);
+            
+            ax1.w_xaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax1.w_yaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax1.w_zaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax1.w_xaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+            ax1.w_yaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+            ax1.w_zaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+                
+            cb1 = plt.colorbar(s1);
+            cb1.set_label('Hit number');
+            
+            ax2 = fig.add_subplot(222,projection='3d');
+            rcol = [];
+            ind = 0;
+            while(ind < len(ftrack)):
+                rcol.append(ind);
+                ind += 1;                    
+            s2 = ax2.scatter(msttrk_x,msttrk_y,msttrk_z,marker='s',s=30,linewidth=0.2,c=rcol,cmap=plt.get_cmap('rainbow'),vmin=min(rcol),vmax=max(rcol));
+            s2.set_edgecolors = s2.set_facecolors = lambda *args:None;  # this disables automatic setting of alpha relative of distance to camera
+            ax2.set_xlabel("x (mm)");
+            ax2.set_ylabel("y (mm)");
+            ax2.set_zlabel("z (mm)");
+            ax2.set_title("MST/Segmenting Algorithm Track");
+            
+            lb_x = ax2.get_xticklabels();
+            lb_y = ax2.get_yticklabels();
+            lb_z = ax2.get_zticklabels();
+            for lb in (lb_x + lb_y + lb_z):
+                lb.set_fontsize(8);
+                
+            ax2.w_xaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax2.w_yaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax2.w_zaxis.set_pane_color((1.0,1.0,1.0,1.0));
+            ax2.w_xaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+            ax2.w_yaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+            ax2.w_zaxis._axinfo.update({'grid' : {'color': (self.grdcol, self.grdcol, self.grdcol, 1)}});
+         
+            cb2 = plt.colorbar(s2);
+            cb2.set_label('Voxel number');
+
+            ax3 = fig.add_subplot(223,projection='3d');
+            colarr = ['red','green','blue','orange','black','violet'];
+            npth = 0;
+            for pth in spaths:
+                xpth = []; ypth = []; zpth = [];
+                # Note: IDs in segments corresponding to ordering in hList. 
+                for nn in pth:
+                    xpth.append(hList[nn.id].GetPosition().x()); ypth.append(hList[nn.id].GetPosition().y()); zpth.append(hList[nn.id].GetPosition().z());
+                ax3.plot(xpth,ypth,zpth,'-',color=colarr[npth % len(colarr)]);
+                npth += 1;
+            ax3.set_xlabel("x (mm)");
+            ax3.set_ylabel("y (mm)");
+            ax3.set_zlabel("z (mm)");
+            ax3.set_title("Segments");
+            
+            lb_x = ax3.get_xticklabels();
+            lb_y = ax3.get_yticklabels();
+            lb_z = ax3.get_zticklabels();
+            for lb in (lb_x + lb_y + lb_z):
+                lb.set_fontsize(8);
+    
+            fn_plt = "{0}/mst_mcvsmst_{1}.{2}".format(self.plt_base,trk_num,self.out_fmt);
+            plt.savefig(fn_plt, bbox_inches='tight');
+                
+            plt.close();
+
+        print "DONE WITH MST ALGORITHM"
 
         return True
 
@@ -151,6 +320,7 @@ class mst(AAlgo):
         return
 
     # Construct a track from the specified list of hits.
+    #  Note: the hit/voxel IDs correspond to the ordering in hList after this method is called.
     def trk_mst(self,hList):
        
         voxelsize = 2.0;
@@ -173,24 +343,48 @@ class mst(AAlgo):
         # (distance) --> voxels are neighbors
         # ---------------------------------------------------------------------------
     
-        # Iterate through all voxels, and for each one find the neighboring voxels.
+        # Use the voxels: determine neighboring voxels by face, edge, or corner connections.
         adjMat = []; nnbrMat = []
-        for vID1,vx1,vy1,vz1,vE1 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
-        
-            nbr_list = [];
-            nnbrs = 0;
-            for vID2,vx2,vy2,vz2,vE2 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
-                
-                if(vx1 == vx2 and vy1 == vy2 and vz1 == vz2):
-                    nbr_list.append(-1);
-                elif ((vx1 == vx2+voxelsize or vx1 == vx2-voxelsize or vx1 == vx2) and (vy1 == vy2+voxelsize or vy1 == vy2-voxelsize or vy1 == vy2) and (vz1 == vz2+voxelsize or vz1 == vz2-voxelsize or vz1 == vz2)):
-                    nbr_list.append(sqrt((vx2-vx1)**2 + (vy2-vy1)**2 + (vz2-vz1)**2));
-                    nnbrs += 1;
-                else:
-                    nbr_list.append(0);
+        if(self.use_voxels):
+            
+            # Iterate through all voxels, and for each one find the neighboring voxels.
+            for vID1,vx1,vy1,vz1,vE1 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
+            
+                nbr_list = [];
+                nnbrs = 0;
+                for vID2,vx2,vy2,vz2,vE2 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
                     
-            nnbrMat.append(nnbrs);
-            adjMat.append(nbr_list);
+                    if(vx1 == vx2 and vy1 == vy2 and vz1 == vz2):
+                        nbr_list.append(-1);
+                    elif ((vx1 == vx2+voxelsize or vx1 == vx2-voxelsize or vx1 == vx2) and (vy1 == vy2+voxelsize or vy1 == vy2-voxelsize or vy1 == vy2) and (vz1 == vz2+voxelsize or vz1 == vz2-voxelsize or vz1 == vz2)):
+                        nbr_list.append(sqrt((vx2-vx1)**2 + (vy2-vy1)**2 + (vz2-vz1)**2));
+                        nnbrs += 1;
+                    else:
+                        nbr_list.append(0);
+                        
+                nnbrMat.append(nnbrs);
+                adjMat.append(nbr_list);
+        
+        # Use the MC true hits: determine neighboring hits by radial distance.
+        else:
+            
+            # Iterate through all voxels, and for each one find the neighboring voxels.
+            for vID1,vx1,vy1,vz1,vE1 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
+            
+                nbr_list = [];
+                nnbrs = 0;
+                for vID2,vx2,vy2,vz2,vE2 in zip(vtrk_ID,vtrk_x,vtrk_y,vtrk_z,vtrk_E):
+                    
+                    if(vx1 == vx2 and vy1 == vy2 and vz1 == vz2):
+                        nbr_list.append(-1);
+                    elif (sqrt((vx1-vx2)**2 + (vy1-vy2)**2 + (vz1-vz2)**2) < self.nbr_dist):
+                        nbr_list.append(sqrt((vx2-vx1)**2 + (vy2-vy1)**2 + (vz2-vz1)**2));
+                        nnbrs += 1;
+                    else:
+                        nbr_list.append(0);
+                        
+                nnbrMat.append(nnbrs);
+                adjMat.append(nbr_list);
         
         if(debug > 2):
             print "Adjacency matrix:";
@@ -426,7 +620,7 @@ class mst(AAlgo):
         for hnode in ftrk:
             return_trk.append(hList[hnode.id]);
         
-        return return_trk;
+        return (return_trk, segments_c);
 
     # Finds the segments using a minimum spanning tree.
     def find_segments_mst(self,mst,adjMat,xpos,ypos,zpos,nodesMarked=False):
@@ -445,12 +639,12 @@ class mst(AAlgo):
             snode = mst_nodes[0];
         else:
             if(debug > 0): print "Found {0} starting nodes.".format(len(snodes));
-    #        i_snode = rd.randint(0,len(snodes)-1);
-    #        snode = snodes[i_snode];
-            snode = snodes[0];
-            for sn in snodes:
-                if(sn.id > snode.id):
-                    snode = sn;
+            i_snode = rd.randint(0,len(snodes)-1);
+            snode = snodes[i_snode];
+            #snode = snodes[0];
+            #for sn in snodes:
+            #    if(sn.id > snode.id):
+            #        snode = sn;
         if(debug > 1): print "Set to starting node {0}".format(snode.id);
         snode.type = 1;
             

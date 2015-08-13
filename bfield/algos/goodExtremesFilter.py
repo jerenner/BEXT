@@ -89,7 +89,7 @@ class goodExtremesFilter(AAlgo):
 		### Getting the Hottest Track
 		hTrack = 0
 		maxEdep = 0
-		for track in self.event.GetTracks():
+		for track in self.event.GetTracks(gate.SIPM):
 			trackEdep = track.GetEnergy()
 			if (trackEdep > maxEdep):
 				maxEdep = trackEdep
