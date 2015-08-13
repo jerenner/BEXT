@@ -28,7 +28,7 @@ CNTJob OUTPUT_DATA SV 1
 
 ############################ EVENTS TO ANALYZE ##########################
 #---------- NUMBER OF EVENTS TO ANALYZE ----------#
-CNTJob NEVENTS I 10000
+CNTJob NEVENTS I 100000
 
 #---------- FIRST EVENS TO ANALYZE ----------#
 CNTJob FEVENT I 0
@@ -64,7 +64,8 @@ CNTJob LIBS SV 1
 #--------- ALGORITHMS-------#
 CNTJob ALGOS SV 2
 goodRoadFilter
-MultiBlobFilter
+MCHitSmearing
+#MultiBlobFilter
 
 #---------- Algorithm parameters ----------#
 goodRoadFilter TYPE S goodRoadFilter
@@ -74,7 +75,13 @@ goodRoadFilter maxNumTracks I 1
 goodRoadFilter minEnergy D 2.435
 goodRoadFilter maxEnergy D 2.485
 
-MultiBlobFilter useTruth I 0
-MultiBlobFilter blobRadius D 20.0
-MultiBlobFilter blobMinE D 0.3
+MCHitSmearing sparse_width I 2
+MCHitSmearing xy_smearing D 2.0
+MCHitSmearing plt_tracks I 0
+MCHitSmearing plt_base S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/out/nmagse2
+MCHitSmearing out_fmt S pdf
+
+#MultiBlobFilter useTruth I 0
+#MultiBlobFilter blobRadius D 20.0
+#MultiBlobFilter blobMinE D 0.3
 
