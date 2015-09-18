@@ -496,6 +496,9 @@ class Curv(AAlgo):
         self.l_e1x_t = []; self.l_e1y_t = []; self.l_e1z_t = []
         self.l_e2x = []; self.l_e2y = []; self.l_e2z = []
         self.l_e2x_t = []; self.l_e2y_t = []; self.l_e2z_t = []
+        self.l_nsegments = [];
+        self.l_nvseg0 = []; self.l_nvseg1 = []; self.l_nvseg2 = []; self.l_nvseg3 = []; self.l_nvseg4 = []
+        self.l_nvseg5 = []; self.l_nvseg6 = []; self.l_nvseg7 = []; self.l_nvseg8 = []; self.l_nvseg9 = []
 
         # Initialize the flipped tracks counter to 0.
         self.flip_trk = 0
@@ -648,7 +651,12 @@ class Curv(AAlgo):
         # Declare the extremes.
         e1x = 0; e1y = 0; e1z = 0
         e2x = 0; e2y = 0; e2z = 0
-
+        
+        # Declare the segment information.
+        nseg = 0;
+        nvseg0 = -1; nvseg1 = -1; nvseg2 = -1; nvseg3 = -1; nvseg4 = -1
+        nvseg5 = -1; nvseg6 = -1; nvseg7 = -1; nvseg8 = -1; nvseg9 = -1
+        
         # Use the voxelized hits if the option is set.
         if(self.use_voxels == 1):
 
@@ -663,10 +671,11 @@ class Curv(AAlgo):
 
             # Get the single track for this event.
             main_trk = all_trks[0]
-            if(len(main_trk.GetHits()) != len(self.event.GetHits())):
-                self.m.log("ERROR: Number of main track hits is not equal to the number of hits in the event.")
+            if(len(main_trk.GetHits()) != len(self.event.GetHits(gate.SIPM))):
+                self.m.log(0,"ERROR: Number of main track hits is not equal to the number of hits in the event.")
                 exit(0)
 
+            # Get the hits from this track.
             trk_hits = main_trk.GetHits()
 
             if(self.print_track):
@@ -725,6 +734,7 @@ class Curv(AAlgo):
 
             # MST-based ordering
             elif(self.trk_omethod == 2):
+                print "Using MST method";
 
                 # Get the order of the hits determined by Paolina.
                 hOrder = main_trk.fetch_ivstore("MSTHits")
@@ -736,6 +746,32 @@ class Curv(AAlgo):
                 
                 # Set the extreme hits.
                 e1 = ftrack[0]; e2 = ftrack[-1];
+                
+                # Get the segment information.
+                sVoxels = main_trk.fetch_ivstore("MSTSegLens")
+                for sv in sVoxels:
+                    if(nseg == 0):
+                        nvseg0 = sv
+                    elif(nseg == 1):
+                        nvseg1 = sv
+                    elif(nseg == 2):
+                        nvseg2 = sv
+                    elif(nseg == 3):
+                        nvseg3 = sv
+                    elif(nseg == 4):
+                        nvseg4 = sv
+                    elif(nseg == 5):
+                        nvseg5 = sv
+                    elif(nseg == 6):
+                        nvseg6 = sv
+                    elif(nseg == 7):
+                        nvseg7 = sv
+                    elif(nseg == 8):
+                        nvseg8 = sv
+                    elif(nseg == 9):
+                        nvseg9 = sv
+                    nseg += 1
+                
 
             # Set the extremes coordinates.
             e1x = e1.GetPosition().x(); e1y = e1.GetPosition().y(); e1z = e1.GetPosition().z()
@@ -914,7 +950,20 @@ class Curv(AAlgo):
         self.l_e2x_t.append(e2x_t)
         self.l_e2y_t.append(e2y_t)
         self.l_e2z_t.append(e2z_t)
-
+        
+        # Save the number of segments and number of voxels in each segment (for MST reconstruction).
+        self.l_nsegments.append(nseg)
+        self.l_nvseg0.append(nvseg0)
+        self.l_nvseg1.append(nvseg1)
+        self.l_nvseg2.append(nvseg2)
+        self.l_nvseg3.append(nvseg3)
+        self.l_nvseg4.append(nvseg4)
+        self.l_nvseg5.append(nvseg5)
+        self.l_nvseg6.append(nvseg6)
+        self.l_nvseg7.append(nvseg7)
+        self.l_nvseg8.append(nvseg8)
+        self.l_nvseg9.append(nvseg9)
+        
         # Decide on whether we will need to flip the track.
         bflip = 0
         if(self.blob_ordering and eblob2 < eblob1):
@@ -1433,9 +1482,9 @@ class Curv(AAlgo):
 
             print "Writing file with {0} entries...".format(len(self.l_scurv_mean))
             fm = open("{0}/scurv_means.dat".format(self.plt_base),"w")
-            fm.write("# (trk) (asymm) (chi2s) (chi2b) (nhits) (nvoxels) (Eblob1) (Eblob2) (blob flipped) (extreme_id) (ext1 x) (ext1 y) (ext1 z) (true ext1 x) (true ext1 y) (true ext1 z) (ext2 x) (ext2 y) (ext2 z) (true ext2 x) (true ext2 y) (true ext2 z) (sign flipped)\n")
-            for evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip in zip(self.l_evtnum,self.l_scurv_mean,self.l_chi2S,self.l_chi2B,self.l_nhits,self.l_nvoxels,self.l_eblob1,self.l_eblob2,self.l_bflip,self.l_correct_extremes,self.l_e1x,self.l_e1y,self.l_e1z,self.l_e1x_t,self.l_e1y_t,self.l_e1z_t,self.l_e2x,self.l_e2y,self.l_e2z,self.l_e2x_t,self.l_e2y_t,self.l_e2z_t,self.l_sflip):
-                fm.write("{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14} {15} {16} {17} {18} {19} {20} {21} {22}\n".format(evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip))
+            fm.write("# (trk) (asymm) (chi2s) (chi2b) (nhits) (nvoxels) (Eblob1) (Eblob2) (blob flipped) (extreme_id) (ext1 x) (ext1 y) (ext1 z) (true ext1 x) (true ext1 y) (true ext1 z) (ext2 x) (ext2 y) (ext2 z) (true ext2 x) (true ext2 y) (true ext2 z) (sign flipped) (nsegments) (nvoxels_seg0) (nvoxels_seg1) (nvoxels_seg2) (nvoxels_seg3) (nvoxels_seg4) (nvoxels_seg5) (nvoxels_seg6) (nvoxels_seg7) (nvoxels_seg8) (nvoxels_seg9)\n")
+            for evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip,nseg,nvseg0,nvseg1,nvseg2,nvseg3,nvseg4,nvseg5,nvseg6,nvseg7,nvseg8,nvseg9 in zip(self.l_evtnum,self.l_scurv_mean,self.l_chi2S,self.l_chi2B,self.l_nhits,self.l_nvoxels,self.l_eblob1,self.l_eblob2,self.l_bflip,self.l_correct_extremes,self.l_e1x,self.l_e1y,self.l_e1z,self.l_e1x_t,self.l_e1y_t,self.l_e1z_t,self.l_e2x,self.l_e2y,self.l_e2z,self.l_e2x_t,self.l_e2y_t,self.l_e2z_t,self.l_sflip,self.l_nsegments,self.l_nvseg0,self.l_nvseg1,self.l_nvseg2,self.l_nvseg3,self.l_nvseg4,self.l_nvseg5,self.l_nvseg6,self.l_nvseg7,self.l_nvseg8,self.l_nvseg9):
+                fm.write("{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10} {11} {12} {13} {14} {15} {16} {17} {18} {19} {20} {21} {22} {23} {24} {25} {26} {27} {28} {29} {30} {31} {32} {33}\n".format(evtnum,scurv,chi2s,chi2b,nhits,nvoxels,eblob1,eblob2,bflip,corrext,e1x,e1y,e1z,e1x_t,e1y_t,e1z_t,e2x,e2y,e2z,e2x_t,e2y_t,e2z_t,sflip,nseg,nvseg0,nvseg1,nvseg2,nvseg3,nvseg4,nvseg5,nvseg6,nvseg7,nvseg8,nvseg9))
             fm.close()
 
         # Generate the profiles.

@@ -48,6 +48,33 @@ class goodExtremesFilter(AAlgo):
 			self.m.log(1, "WARNING!! Parameter: 'maxDist' not defined.")
 			exit(0)
 
+                # Flag to cut on segment fraction.
+                try:
+                    self.par_sfrac_cut = self.ints['sfrac_cut']
+                    self.sfrac_cut = False
+                    if(self.par_sfrac_cut == 1):
+                        self.sfrac_cut = True
+                        self.m.log(1, "Cut on segment fraction = {0}".format(self.sfrac_cut))
+                except KeyError:
+                    self.m.log(1, "WARNING!! Parameter: 'sfrac_cut' not defined.")
+                    exit(0)
+
+                # Number of segments in numerator of segment fraction.
+                try:
+                        self.sfrac_num = self.ints['sfrac_num']
+                        self.m.log(1, "Segments in numerator of segment fraction = {0}".format(self.sfrac_num))
+                except KeyError:
+                        self.m.log(1, "WARNING!! Parameter: 'sfrac_num' not defined.")
+                        exit(0)
+
+                # Minimum value of segment fraction to pass cut.
+                try:
+                        self.sfrac_val = self.doubles['sfrac_val']
+                        self.m.log(1, "Minimum value of segment fraction to pass cut = {0}".format(self.sfrac_val))
+                except KeyError:
+                        self.m.log(1, "WARNING!! Parameter: 'sfrac_val' not defined.")
+                        exit(0) 
+
 
 
 	############################################################		
@@ -95,109 +122,135 @@ class goodExtremesFilter(AAlgo):
 				maxEdep = trackEdep
 				hTrack = track
 
-		distExtFirst  = hTrack.fetch_dvstore("DistExtFirst")
-		distExtSecond = hTrack.fetch_dvstore("DistExtSecond")
+                # Cut based on segment fractions.
+                if(self.sfrac_cut):
 
+                    # Get the number of voxels in each segment.
+                    sVoxels = hTrack.fetch_ivstore("MSTSegLens")
+                    
+                    # Compute the numerator and denominator in the segment fraction.
+                    nseg = 0; num = 0; denom = 0          
+                    for nvs in sVoxels:
+                        if(nvs == -1): nvs = 0
+                        if(nseg < self.sfrac_num):
+                            num += nvs
+                        denom += nvs
+                        nseg += 1
 
-		### Getting the MC extremes
-		ext1MCPos = ext2MCPos = 0
-		MCTracks = event.GetMCTracks()
+                    sfrac = 1.0*num/denom
+                    print "--- Found num = {0}, denom = {1} for sfrac = {2}".format(num,denom,sfrac)
+ 
+                    # Make the cut.
+                    if(sfrac > self.sfrac_val):
+                        self.numOutputEvents += 1
+                        return True
+                    return False
 
-		# If Signal, True extremes are the second extremes of "primary" tracks
-		if (event.GetMCEventType() == gate.BB0NU):
-			numPrimaries = 0
-			for MCTrack in MCTracks:
-				if (MCTrack.GetParticle().IsPrimary()):
-					numPrimaries += 1
-					if (numPrimaries == 1): ext1MCPos = MCTrack.GetExtremes().second.GetPosition()
-					if (numPrimaries == 2):
-						ext2MCPos = MCTrack.GetExtremes().second.GetPosition()
-						break
+                # Cut based on accuracy of Paolina extremes.
+                else:
 
-		# If Background, True extremes are the extremes of the Hottest TTrack
-		else:
-			# Getting the hottest True Track from the Hottest Track
-			MCTrackIDs = hTrack.fetch_ivstore("mcTrackIDs")
-			maxEdep = 0
-			hMCTrack = 0
-			for MCTrack in MCTracks:
-				if MCTrack.GetID() in MCTrackIDs : 
-					eDep = MCTrack.GetEnergy()
-					if (eDep > maxEdep):
-						maxEdep = eDep
-						hMCTrack = MCTrack
+                    distExtFirst  = hTrack.fetch_dvstore("DistExtFirst")
+                    distExtSecond = hTrack.fetch_dvstore("DistExtSecond")
+    
+    
+    	    	    ### Getting the MC extremes
+    	    	    ext1MCPos = ext2MCPos = 0
+    	    	    MCTracks = event.GetMCTracks()
+    
+    	    	    # If Signal, True extremes are the second extremes of "primary" tracks
+    	    	    if (event.GetMCEventType() == gate.BB0NU):
+    	    	    	numPrimaries = 0
+    	    	    	for MCTrack in MCTracks:
+    	    	    		if (MCTrack.GetParticle().IsPrimary()):
+    	    	    			numPrimaries += 1
+    	    	    			if (numPrimaries == 1): ext1MCPos = MCTrack.GetExtremes().second.GetPosition()
+    	    	    			if (numPrimaries == 2):
+    	    	    				ext2MCPos = MCTrack.GetExtremes().second.GetPosition()
+    	    	    				break
+    
+    	    	    # If Background, True extremes are the extremes of the Hottest TTrack
+    	    	    else:
+    	    	    	# Getting the hottest True Track from the Hottest Track
+    	    	    	MCTrackIDs = hTrack.fetch_ivstore("mcTrackIDs")
+    	    	    	maxEdep = 0
+    	    	    	hMCTrack = 0
+    	    	    	for MCTrack in MCTracks:
+    	    	    		if MCTrack.GetID() in MCTrackIDs : 
+    	    	    			eDep = MCTrack.GetEnergy()
+    	    	    			if (eDep > maxEdep):
+    	    	    				maxEdep = eDep
+    	    	    				hMCTrack = MCTrack
+    
+    	    	    	ext1MCPos = hMCTrack.GetExtremes().first.GetPosition()
+    	    	    	ext2MCPos = hMCTrack.GetExtremes().second.GetPosition()
+    
+    	    	    self.m.log(2, 'Extreme 1 MC Position: (%f, %f, %f)' %(ext1MCPos.x(), ext1MCPos.y(), ext1MCPos.z()))
+    	    	    self.m.log(2, 'Extreme 2 MC Position: (%f, %f, %f)' %(ext2MCPos.x(), ext2MCPos.y(), ext2MCPos.z()))
+    
+    
+    	    	    ### Getting Recons extremes
+    	    	    energyStart = -1
+    	    	    ext1Pos = ext2Pos = 0
+    	    	    blob1E = blob2E = 0
+    
+    	    	    ext1Pos = hTrack.GetExtremes().first.GetPosition()
+    	    	    ext2Pos = hTrack.GetExtremes().second.GetPosition()
+    	    	    
+    	    	    # Getting the energies
+    	    	    for hit in hTrack.GetHits():
+    	    	    	dist1 = distExtFirst[hit.GetID()]
+    	    	    	if (dist1 < self.blobRadius): blob1E += hit.GetAmplitude()
+    
+    	    	    	dist2 = distExtSecond[hit.GetID()]
+    	    	    	if (dist2 < self.blobRadius):	blob2E += hit.GetAmplitude()
+    
+    	    	    # Ordering & Filling Histos
+    	    	    if (blob1E < blob2E):
+    	    	    	ext1Pos = hTrack.GetExtremes().first.GetPosition()
+    	    	    	ext2Pos = hTrack.GetExtremes().second.GetPosition()
+    
+    	    	    else:
+    	    	    	ext2Pos = hTrack.GetExtremes().first.GetPosition()
+    	    	    	ext1Pos = hTrack.GetExtremes().second.GetPosition()
+    
+    	    	    self.m.log(2, 'Extreme 1 Rec. Position: (%f, %f, %f)' %(ext1Pos.x(), ext1Pos.y(), ext1Pos.z()))
+    	    	    self.m.log(2, 'Extreme 2 Rec. Position: (%f, %f, %f)' %(ext2Pos.x(), ext2Pos.y(), ext2Pos.z()))
+    
+    
+    	    	    ### Matching Rec & True extremes by euclidean distance
+    	    	    swapped = False
+    	    	    dist1 = dist2 = 0
+    	    	    d11 = gate.distance(ext1Pos, ext1MCPos)
+    	    	    d12 = gate.distance(ext1Pos, ext2MCPos)
+    	    	    d21 = gate.distance(ext2Pos, ext1MCPos)
+    	    	    d22 = gate.distance(ext2Pos, ext2MCPos)
+    
+    	    	    if ((d11+d12) < (d12+d21)):
+    	    	    	dist1 = d11
+    	    	    	dist2 = d22
+    	    	    else:
+    	    	    	dist1 = d12
+    	    	    	dist2 = d21
+    	    	    	swapped = True 
+    	    	    	self.numSwappedEvents += 1
+    	    	    	self.m.log(2, 'Swapped extremes')
+    
+    
+    	    	    self.m.log(2, 'Distance 1:', dist1)
+    	    	    self.m.log(2, 'Distance 2:', dist2)
+    
+    
+    	    	    # Filling Histograms
+    	    	    self.hman.fill(self.alabel("DistTrueRec1"), dist1)
+    	    	    self.hman.fill(self.alabel("DistTrueRec2"), dist2)
+    
+    	    	    if ((dist1 < self.maxDist) and (dist2 < self.maxDist)):
+                            #if ((dist1 >= self.maxDist) or (dist2 >= self.maxDist)):
+    	    	    	self.numOutputEvents += 1
+    	    	    	return True
+    
+    	    	    return False
 
-			ext1MCPos = hMCTrack.GetExtremes().first.GetPosition()
-			ext2MCPos = hMCTrack.GetExtremes().second.GetPosition()
-
-		self.m.log(2, 'Extreme 1 MC Position: (%f, %f, %f)' %(ext1MCPos.x(), ext1MCPos.y(), ext1MCPos.z()))
-		self.m.log(2, 'Extreme 2 MC Position: (%f, %f, %f)' %(ext2MCPos.x(), ext2MCPos.y(), ext2MCPos.z()))
-
-
-		### Getting Recons extremes
-		energyStart = -1
-		ext1Pos = ext2Pos = 0
-		blob1E = blob2E = 0
-
-		ext1Pos = hTrack.GetExtremes().first.GetPosition()
-		ext2Pos = hTrack.GetExtremes().second.GetPosition()
-		
-		# Getting the energies
-		for hit in hTrack.GetHits():
-			dist1 = distExtFirst[hit.GetID()]
-			if (dist1 < self.blobRadius): blob1E += hit.GetAmplitude()
-
-			dist2 = distExtSecond[hit.GetID()]
-			if (dist2 < self.blobRadius):	blob2E += hit.GetAmplitude()
-
-		# Ordering & Filling Histos
-		if (blob1E < blob2E):
-			ext1Pos = hTrack.GetExtremes().first.GetPosition()
-			ext2Pos = hTrack.GetExtremes().second.GetPosition()
-
-		else:
-			ext2Pos = hTrack.GetExtremes().first.GetPosition()
-			ext1Pos = hTrack.GetExtremes().second.GetPosition()
-
-		self.m.log(2, 'Extreme 1 Rec. Position: (%f, %f, %f)' %(ext1Pos.x(), ext1Pos.y(), ext1Pos.z()))
-		self.m.log(2, 'Extreme 2 Rec. Position: (%f, %f, %f)' %(ext2Pos.x(), ext2Pos.y(), ext2Pos.z()))
-
-
-		### Matching Rec & True extremes by euclidean distance
-		swapped = False
-		dist1 = dist2 = 0
-		d11 = gate.distance(ext1Pos, ext1MCPos)
-		d12 = gate.distance(ext1Pos, ext2MCPos)
-		d21 = gate.distance(ext2Pos, ext1MCPos)
-		d22 = gate.distance(ext2Pos, ext2MCPos)
-
-		if ((d11+d12) < (d12+d21)):
-			dist1 = d11
-			dist2 = d22
-		else:
-			dist1 = d12
-			dist2 = d21
-			swapped = True 
-			self.numSwappedEvents += 1
-			self.m.log(2, 'Swapped extremes')
-
-
-		self.m.log(2, 'Distance 1:', dist1)
-		self.m.log(2, 'Distance 2:', dist2)
-
-
-		# Filling Histograms
-		self.hman.fill(self.alabel("DistTrueRec1"), dist1)
-		self.hman.fill(self.alabel("DistTrueRec2"), dist2)
-
-		if ((dist1 < self.maxDist) and (dist2 < self.maxDist)):
-                #if ((dist1 >= self.maxDist) or (dist2 >= self.maxDist)):
-			self.numOutputEvents += 1
-			return True
-
-		return False
-
-		
 
 	############################################################
 	def finalize(self):

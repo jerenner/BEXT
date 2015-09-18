@@ -24,7 +24,8 @@ CNTJob READER S gateReader
 
 #--------- INPUT DATA FILES -------#
 CNTJob INPUT_DATA SV 1
-/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/data_backup/100kevts_noblobfilter_sm/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.p1.gate.root
+/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.p1.gate.root
+#/data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/data_backup/100kevts_noblobfilter_sm/MagBox_Xe_10atm_05tesla.e2447.0.voxels2.energy07.p1.gate.root
 
 ############################ OUTPUT DATA ################################
 #------ SAVE EVENTS IN OUTPUT FILE ----------#
@@ -39,7 +40,7 @@ CNTJob OUTPUT_DATA SV 1
 
 ############################ EVENTS TO ANALYZE ##########################
 #---------- NUMBER OF EVENTS TO ANALYZE ----------#
-CNTJob NEVENTS I 10
+CNTJob NEVENTS I 10000
 
 #---------- FIRST EVENS TO ANALYZE ----------#
 CNTJob FEVENT I 0
@@ -57,21 +58,22 @@ CNTJob PATHS SV 1
 # declare algorithms to be executed
 CNTJob ALGOS SV 3
 goodExtremesFilter
-mst
+MultiBlobFilter
 Curv
 
 # declare algorithm parameters
 goodExtremesFilter LEVEL I 1
 goodExtremesFilter maxDist D 1000.
 goodExtremesFilter blobRadius D 20
+goodExtremesFilter sfrac_cut I 0
+goodExtremesFilter sfrac_num I 2
+goodExtremesFilter sfrac_val D 0.7
 
-mst min_path_voxels I 5
-mst path_overlap_tol I 0
-mst use_voxels I 0
-mst nbr_dist D 6.25
-mst plt_tracks I 1
-mst plt_base S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out/nmagse2
-mst out_fmt S pdf
+MultiBlobFilter LEVEL I 3
+MultiBlobFilter useTruth I 0
+MultiBlobFilter blobRadius D 20.0
+MultiBlobFilter blobMinE D 0.2
+MultiBlobFilter trk_omethod I 0
 
 Curv trk_name S nmagse2
 Curv trk_outdir S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out
@@ -92,17 +94,17 @@ Curv kon_max D 0.6
 Curv prof_gen I 0
 Curv prof_cf I 1
 Curv plt_drawfilter I 0
-Curv plt_drawtrk I 1
+Curv plt_drawtrk I 0
 Curv output_means I 1
 Curv verify_extremes I 1
-Curv use_voxels I 0
+Curv use_voxels I 1
 Curv blob_ordering I 0
-Curv sign_ordering I 0
+Curv sign_ordering I 1
 Curv blob_radius D 20.0
 Curv ctrack_dist D 2.0
-Curv sparse_width I 1
+Curv sparse_width I 0
 Curv xy_smearing D 0.0
-Curv trk_omethod I 2
+Curv trk_omethod I 0
 
 # declare log file
 CNTJob FLOG S job_nmagse.log
