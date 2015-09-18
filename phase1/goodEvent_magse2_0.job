@@ -28,7 +28,7 @@ CNTJob OUTPUT_DATA SV 1
 
 ############################ EVENTS TO ANALYZE ##########################
 #---------- NUMBER OF EVENTS TO ANALYZE ----------#
-CNTJob NEVENTS I 100000
+CNTJob NEVENTS I 10000
 
 #---------- FIRST EVENS TO ANALYZE ----------#
 CNTJob FEVENT I 0
@@ -53,20 +53,24 @@ CNTJob FHISTOS S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/MagBox
 
 ########################## ALGORITHMS ################################
 #--------- PATHS with modules to be used -------#
-CNTJob PATHS SV 2
+CNTJob PATHS SV 3
 /home/jmunoz/dev/Next100_2K15/tracks/algos/
+/home/jmunoz/dev/Next100_2K15/extremes/algos/
 /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/algos
 
 #--------- C++ Libraries -------#
-CNTJob LIBS SV 1
+CNTJob LIBS SV 2
 /home/jmunoz/dev/Next100_2K15/tracks/goodRoadFilter/lib/libgoodRoadFilter.so
+/home/jmunoz/dev/Next100_2K15/extremes/simpleBlobFilter/lib/libsimpleBlobFilter.so
 
 #--------- ALGORITHMS-------#
-CNTJob ALGOS SV 2
+CNTJob ALGOS SV 3
 goodRoadFilter
 MCHitSmearing
+mst
 #MultiBlobFilter
-
+#simpleBlobFilter
+#
 #---------- Algorithm parameters ----------#
 goodRoadFilter TYPE S goodRoadFilter
 goodRoadFilter LAN  S c++
@@ -81,7 +85,23 @@ MCHitSmearing plt_tracks I 0
 MCHitSmearing plt_base S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/phase1/out/nmagse2
 MCHitSmearing out_fmt S pdf
 
+mst min_path_voxels I 2
+mst path_overlap_tol I 0
+mst use_voxels I 1
+mst nbr_dist D 10.4
+mst plt_tracks I 1
+mst plt_base S /data4/NEXT/users/jrenner/kalmanfilter/nextb_gate/bfield/out/nmagse2
+mst out_fmt S pdf
+
+#MultiBlobFilter LEVEL I 3
 #MultiBlobFilter useTruth I 0
 #MultiBlobFilter blobRadius D 20.0
 #MultiBlobFilter blobMinE D 0.3
+#MultiBlobFilter trk_omethod I 2
 
+#simpleBlobFilter TYPE S simpleBlobFilter
+#simpleBlobFilter LAN  S c++
+#simpleBlobFilter LEVEL I 1
+#simpleBlobFilter blobRadius D 20.0
+#simpleBlobFilter blobMinE D 0.3
+#simpleBlobFilter minVoxels I 0
